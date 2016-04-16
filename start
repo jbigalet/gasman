@@ -1,0 +1,3 @@
+as $1.s -o obj/$1.o
+ld obj/$1.o -o bin/$1
+./bin/$1
