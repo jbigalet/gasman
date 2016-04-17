@@ -33,10 +33,10 @@ main:
   call printf
 
   # screensize = x*y*depth/8. store it in -300
-  mov (%rsp), %rsi
-  imul 4(%rsp), %rsi
-  imul 24(%rsp), %rsi
-  shr $3, %rsi
+  mov (%rsp), %esi
+  imul 4(%rsp), %esi
+  imul 24(%rsp), %esi
+  shr $3, %esi
   mov %rsi, 300(%rsp)
 
   # print screensize
@@ -58,9 +58,49 @@ main:
   call printf
 
   # mmap
-  /* mov $9, %rax */
-  /* syscall */
+  mov $9, %rax  # mmap
+  mov $0, %rdi  # addr
+  mov 300(%rsp), %rsi  # len
+  mov $3, %rdx  # prot = READ + WRITE
+  mov $1, %r10  # flags = MAP_SHARED
+  mov %rbp, %r8  # fd
+  mov $0, %r9  # off
+  syscall
+  mov %rax, 400(%rsp) # save res
+  mov %rax, %r13
 
+  mov $100, %r10
+  mov $100, %r11
+
+.againx:
+  add $1, %r10
+  cmp $400, %r10
+  je .againy
+  jmp .draw
+
+.againy:
+  mov $100, %r10
+  add $1, %r11
+  cmp $400, %r11
+  jne .draw
+  jmp .done
+
+.draw:  # x=r10, y=r11
+  mov 16(%rsp), %r12d
+  add %r10, %r12
+  imul 24(%rsp), %r12d
+  shr $3, %r12
+
+  mov 20(%rsp), %r14d
+  add %r11, %r14
+  imul 128(%rsp), %r14d
+
+  add %r12, %r14
+
+  movl $0xffff00, (%r14, %r13)
+  jmp .againx
+
+.done:
   #exit
   mov $60, %rax
   mov $0, %rdi
