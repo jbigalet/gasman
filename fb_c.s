@@ -153,19 +153,6 @@ main:
   add $1, %r13
   jmp .readwalls
 
-  /* mov $0, %r14 */
-/* .drawtilex: */
-/*   mov %r12, %r10 */
-/*   imul $TILE_SIZE, %r10 */
-/*   add %r14, %r10 */
-/*   add $100, %r10 */
-
-/*   call .draw */
-/*   add $1, %r14 */
-/*   cmp $TILE_SIZE, %r14 */
-/*   je .readwalls */
-/*   jmp .drawtilex */
-
   # print current wall to stdout
   /* mov $SYS_WRITE, %rax */
   /* mov $1, %rdi */
@@ -181,28 +168,6 @@ main:
   syscall
 
   jmp .done
-
-
-  # draw square
-  /* mov $100, %r10 # x=100 */
-  /* mov $100, %r11 # y=100 */
-  /* mov $0xffff00, %r9 # color=yellow */
-  /* jmp .againx */
-
-/* .againx: */
-  /* add $1, %r10 */
-  /* cmp $400, %r10 */
-  /* je .againy */
-  /* call .draw */
-  /* jmp .againx */
-
-/* .againy: */
-  /* mov $100, %r10 */
-  /* add $1, %r11 */
-  /* cmp $400, %r11 */
-  /* je .done */
-  /* call .draw */
-  /* jmp .againx */
 
 .draw:  # x=r10, y=r11, color=r9
   mov 16(%rbp), %ebx
