@@ -13,7 +13,7 @@ fbdev:
 .equ FBIOGET_VSCREENINFO, 17920
 .equ FBIOGET_FSCREENINFO, 17922
 
-.equ TILE_SIZE, 10
+.equ TILE_SIZE, 16
 
 .lcomm fb_handle, 8
 .lcomm screensize, 8
@@ -116,8 +116,12 @@ main:
   je .bluetile
   cmpb $46, buffer
   je .greytile
-  cmpb $79, buffer
+  cmpb $124, buffer
+  je .greytile
+  cmpb $71, buffer
   je .yellowtile
+  cmpb $79, buffer
+  je .beigetile
   cmpb $94, buffer
   je .redtile
   jmp .blacktile
@@ -136,6 +140,9 @@ main:
   jmp .aftercolor
 .redtile:
   mov $0xff0000, %r9
+  jmp .aftercolor
+.beigetile:
+  mov $0xf5f5dc, %r9
   jmp .aftercolor
 .aftercolor:
   call .drawtile
