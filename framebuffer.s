@@ -2,6 +2,12 @@
     .section    .rodata
 .LC0:
     .string    "/dev/fb0"
+.LC1:
+    .string    "%dx%d, %dbpp\n"
+.LC2:
+    .string    "screensize: %d\n"
+.LC3:
+    .string    "line_length: %d\n"
     .text
     .globl    main
     .type    main, @function
@@ -37,6 +43,13 @@ main:
     movl    %eax, %edi
     movl    $0, %eax
     call    ioctl
+    movl    -184(%rbp), %ecx
+    movl    -204(%rbp), %edx
+    movl    -208(%rbp), %eax
+    movl    %eax, %esi
+    movl    $.LC1, %edi
+    movl    $0, %eax
+    call    printf
     movl    -208(%rbp), %edx
     movl    -204(%rbp), %eax
     imull    %eax, %edx
@@ -45,6 +58,16 @@ main:
     shrl    $3, %eax
     movl    %eax, %eax
     movq    %rax, -24(%rbp)
+    movq    -24(%rbp), %rax
+    movq    %rax, %rsi
+    movl    $.LC2, %edi
+    movl    $0, %eax
+    call    printf
+    movl    -240(%rbp), %eax
+    movl    %eax, %esi
+    movl    $.LC3, %edi
+    movl    $0, %eax
+    call    printf
     movq    -24(%rbp), %rax
     movl    -12(%rbp), %edx
     movl    $0, %r9d
@@ -78,37 +101,17 @@ main:
     movq    -40(%rbp), %rdx
     movq    -32(%rbp), %rax
     addq    %rdx, %rax
-    movb    $100, (%rax)
+    movb    $-1, (%rax)
     movq    -40(%rbp), %rax
     leaq    1(%rax), %rdx
     movq    -32(%rbp), %rax
-    addq    %rax, %rdx
-    movl    -4(%rbp), %eax
-    subl    $100, %eax
-    movl    %eax, %ecx
-    shrl    $31, %ecx
-    addl    %ecx, %eax
-    sarl    %eax
-    addl    $15, %eax
-    movb    %al, (%rdx)
+    addq    %rdx, %rax
+    movb    $-1, (%rax)
     movq    -40(%rbp), %rax
     leaq    2(%rax), %rdx
     movq    -32(%rbp), %rax
-    leaq    (%rdx,%rax), %rsi
-    movl    -8(%rbp), %eax
-    leal    -100(%rax), %ecx
-    movl    $1717986919, %edx
-    movl    %ecx, %eax
-    imull    %edx
-    sarl    %edx
-    movl    %ecx, %eax
-    sarl    $31, %eax
-    subl    %eax, %edx
-    movl    %edx, %eax
-    movl    $-56, %edx
-    subl    %eax, %edx
-    movl    %edx, %eax
-    movb    %al, (%rsi)
+    addq    %rdx, %rax
+    movb    $-1, (%rax)
     movq    -40(%rbp), %rax
     leaq    3(%rax), %rdx
     movq    -32(%rbp), %rax
@@ -122,14 +125,6 @@ main:
 .L2:
     cmpl    $299, -8(%rbp)
     jle    .L5
-    movq    -24(%rbp), %rdx
-    movq    -32(%rbp), %rax
-    movq    %rdx, %rsi
-    movq    %rax, %rdi
-    call    munmap
-    movl    -12(%rbp), %eax
-    movl    %eax, %edi
-    call    close
     movl    $0, %eax
     leave
     .cfi_def_cfa 7, 8

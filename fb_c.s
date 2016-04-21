@@ -118,7 +118,10 @@ main:
   je .greytile
   cmpb $79, buffer
   je .yellowtile
+  cmpb $94, buffer
+  je .redtile
   jmp .blacktile
+
 .bluetile:
   mov $0x0000ff, %r9
   jmp .aftercolor
@@ -130,6 +133,9 @@ main:
   jmp .aftercolor
 .yellowtile:
   mov $0xffff00, %r9
+  jmp .aftercolor
+.redtile:
+  mov $0xff0000, %r9
   jmp .aftercolor
 .aftercolor:
   call .drawtile
