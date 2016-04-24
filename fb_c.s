@@ -9,17 +9,35 @@ fbdev:
 .equ SYS_CLOSE, 3
 .equ SYS_MMAP, 9
 .equ SYS_IOCTL, 16
+.equ SYS_SELECT, 23
+.equ SYS_NANOSLEEP, 35
 
 .equ FBIOGET_VSCREENINFO, 17920
 .equ FBIOGET_FSCREENINFO, 17922
 
 .equ TILE_SIZE, 16
 
+.equ TCGETS, 0x5401
+.equ TCSETS, 0x5402
+.equ ICANON, 2
+.equ ECHO, 8
+.equ ICANON_OR_ECHO, 10
+
 .lcomm fb_handle, 8
 .lcomm screensize, 8
 .lcomm fb_map, 8
 .lcomm walls_handle, 8
 .lcomm buffer, 1
+.lcomm select_timeval, 16
+.lcomm sleep_timeval, 16
+
+termios:
+  .fill 12, 1, 0
+termios_from_lflag:
+  .fill 24, 1, 0
+
+fd_set:
+  .fill 128, 1, 0
 
 .section .text
 .globl main
@@ -27,6 +45,62 @@ main:
   # save state
   subq $500, %rsp
   mov %rsp, %rbp
+
+  # get stdin termios
+  mov $SYS_IOCTL, %rax # ioctl
+  mov $0, %rdi # stdin
+  mov $TCGETS, %rsi # cmd
+  mov $termios, %rdx # dump in
+  syscall
+
+  # remove icanon & echo frmo termios
+  mov $ICANON_OR_ECHO, %r8d
+  not %r8d
+  and %r8d, termios_from_lflag
+
+  # set stdin termios (without icanon & echo)
+  mov $SYS_IOCTL, %rax # ioctl
+  mov $0, %rdi # stdin
+  mov $TCSETS, %rsi # cmd
+  mov $termios, %rdx # dump in
+  syscall
+
+.readkey:
+  # sleep for 1 second
+  movb $1, sleep_timeval
+  mov $SYS_NANOSLEEP, %rax
+  mov $sleep_timeval, %rdi
+  mov $0, %rsi
+  syscall
+
+  movb $1, fd_set
+  mov $SYS_SELECT, %rax # select
+  mov $1, %rdi # n
+  mov $fd_set, %rsi # inp
+  mov $0, %rdx # outp
+  mov $0, %r10 # exp
+  mov $select_timeval, %r8 # timeval
+  syscall
+
+  cmp $1, %rax
+  jne .dont_read
+
+  mov $SYS_READ, %rax # read
+  mov $0, %rdi # stdin
+  mov $buffer, %rsi
+  mov $1, %rdx
+  syscall
+
+  mov $SYS_WRITE, %rax
+  mov $1, %rdi
+  mov $buffer, %rsi
+  mov $1, %rdx
+  syscall
+
+  jmp .readkey
+
+.dont_read:
+  jmp .done
 
   # open framebuffer
   mov $SYS_OPEN, %rax # open
@@ -225,3 +299,11 @@ linelen:
   .asciz "linelen: %d\n"
 wallfile:
   .asciz "/home/jbigalet/plop/walls"
+left_pressed:
+  .asciz "left pressed"
+right_pressed:
+  .asciz "right pressed"
+up_pressed:
+  .asciz "up pressed"
+down_pressed:
+  .asciz "down pressed"
