@@ -40,7 +40,8 @@ fbdev: # framebuffer
 .lcomm walls_handle, 8
 .lcomm buffer, 1
 .lcomm select_timeval, 16
-.lcomm sleep_timeval, 16
+.lcomm sleep_timeval, 8
+.lcomm sleep_timeval_nano, 8
 
 termios:
   .fill 12, 1, 0
@@ -81,29 +82,29 @@ fd_set:
 # positions are in pixels, except for the corners
 
   # pacman
-.lcomm PACMAN_X, 2
-.lcomm PACMAN_Y, 2
+.lcomm PACMAN_X, 4
+.lcomm PACMAN_Y, 4
 
   # ghosts
-.lcomm PINKY_X, 2
-.lcomm PINKY_Y, 2
-.lcomm PINKY_CORNER_TILE_X, 2
-.lcomm PINKY_CORNER_TILE_Y, 2
+.lcomm PINKY_X, 4
+.lcomm PINKY_Y, 4
+.lcomm PINKY_CORNER_TILE_X, 4
+.lcomm PINKY_CORNER_TILE_Y, 4
 
-.lcomm INKY_X, 2
-.lcomm INKY_Y, 2
-.lcomm INKY_CORNER_TILE_X, 2
-.lcomm INKY_CORNER_TILE_Y, 2
+.lcomm INKY_X, 4
+.lcomm INKY_Y, 4
+.lcomm INKY_CORNER_TILE_X, 4
+.lcomm INKY_CORNER_TILE_Y, 4
 
-.lcomm CLYDE_X, 2
-.lcomm CLYDE_Y, 2
-.lcomm CLYDE_CORNER_TILE_X, 2
-.lcomm CLYDE_CORNER_TILE_Y, 2
+.lcomm CLYDE_X, 4
+.lcomm CLYDE_Y, 4
+.lcomm CLYDE_CORNER_TILE_X, 4
+.lcomm CLYDE_CORNER_TILE_Y, 4
 
-.lcomm BLINKY_X, 2
-.lcomm BLINKY_Y, 2
-.lcomm BLINKY_CORNER_TILE_X, 2
-.lcomm BLINKY_CORNER_TILE_Y, 2
+.lcomm BLINKY_X, 4
+.lcomm BLINKY_Y, 4
+.lcomm BLINKY_CORNER_TILE_X, 4
+.lcomm BLINKY_CORNER_TILE_Y, 4
 
 
 
@@ -229,9 +230,35 @@ main:
   syscall
   mov %rax, fb_map
 
+  # standard sleep is 1/30 s
+  movb $0, sleep_timeval
+  movl $33333333, sleep_timeval_nano
+
   call .read_board_from_file
+
+
+
+
+.main_loop:
+  cmpb $0, BOARD
+  je .blink_1
+  movb $0, BOARD
+  jmp .blink_end
+.blink_1:
+  movb $1, BOARD
+.blink_end:
   call .draw_board
-  jmp .exit
+
+  # move pacman
+  add $1, PACMAN_X
+
+  # sleep for 1/30 second
+  mov $SYS_NANOSLEEP, %rax
+  mov $sleep_timeval, %rdi
+  mov $0, %rsi
+  syscall
+
+  jmp .main_loop
 
 
 
@@ -261,15 +288,28 @@ main:
   cmpb $10, buffer
   je .wallincy
 
-  cmpb $35, buffer
+  cmpb $35, buffer # # == wall
   je .read_board__wall
-  jmp .read_board__not_wall
+
+  cmpb $71, buffer # G == pacman
+  je .read_board__pacman
+
+  jmp .read_board__not_wall # == unknown
 
 .read_board__wall:
-  mov $0, %r8
+  mov $TILE_WALL, %r8
+  jmp .read_board__set_tile
+.read_board__pacman:
+  # set pacman pos
+  imul $TILE_SIZE, %r12, %r14
+  movl %r14d, PACMAN_X
+  imul $TILE_SIZE, %r13, %r14
+  movl %r14d, PACMAN_Y
+  # pacman tile defaults to empty
+  mov $TILE_EMPTY, %r8
   jmp .read_board__set_tile
 .read_board__not_wall:
-  mov $1, %r8
+  mov $TILE_EMPTY, %r8
   jmp .read_board__set_tile
 
 .read_board__set_tile:
@@ -344,7 +384,7 @@ main:
   mov $BOARD_WIDTH, %r14
   imul %r13, %r14
   add %r12, %r14
-  mov %r8, BOARD(%r14)
+  movb %r8b, BOARD(%r14)
   ret
 
 
@@ -383,6 +423,32 @@ main:
   add $1, %r13
   cmp $BOARD_HEIGHT, %r13
   jne .draw_board__inc_x
+
+  # all static stuff has been drawn
+  # now, draw pacman & the ghosts
+  # TODO ghosts
+
+
+  # draw pacman
+
+  mov $0, %r14
+  mov $0, %r15
+  mov $0xff0000, %r9
+.pacman_draw_loop:
+  movl PACMAN_X, %r10d
+  add %r14, %r10
+  movl PACMAN_Y, %r11d
+  add %r15, %r11
+  call .draw_pixel
+  add $1, %r14
+  cmp $10, %r14
+  jne .pacman_draw_loop
+  mov $0, %r14
+  add $1, %r15
+  cmp $10, %r15
+  jne .pacman_draw_loop
+
+  # board is drawn (hopefully)
   ret
 
 
@@ -415,12 +481,10 @@ main:
   mov %r12, %r10
   imul $TILE_SIZE, %r10
   add %r14, %r10
-  add $100, %r10
 
   mov %r13, %r11
   imul $TILE_SIZE, %r11
   add %r15, %r11
-  add $100, %r11
 
   call .draw_pixel
   add $1, %r14
