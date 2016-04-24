@@ -84,6 +84,8 @@ fd_set:
   # pacman
 .lcomm PACMAN_X, 4
 .lcomm PACMAN_Y, 4
+.lcomm PACMAN_DIRECTION_X, 4
+.lcomm PACMAN_DIRECTION_Y, 4
 
   # ghosts
 .lcomm PINKY_X, 4
@@ -115,61 +117,10 @@ main:
   subq $500, %rsp
   mov %rsp, %rbp
 
-  /* # get stdin termios */
-  /* mov $SYS_IOCTL, %rax # ioctl */
-  /* mov $0, %rdi # stdin */
-  /* mov $TCGETS, %rsi # cmd */
-  /* mov $termios, %rdx # dump in */
-  /* syscall */
 
-  /* # remove icanon & echo frmo termios */
-  /* mov $ICANON_OR_ECHO, %r8d */
-  /* not %r8d */
-  /* and %r8d, termios_from_lflag */
 
-  /* # set stdin termios (without icanon & echo) */
-  /* mov $SYS_IOCTL, %rax # ioctl */
-  /* mov $0, %rdi # stdin */
-  /* mov $TCSETS, %rsi # cmd */
-  /* mov $termios, %rdx # dump in */
-  /* syscall */
 
-/* .readkey: */
-  /* # sleep for 1 second */
-  /* movb $1, sleep_timeval */
-  /* mov $SYS_NANOSLEEP, %rax */
-  /* mov $sleep_timeval, %rdi */
-  /* mov $0, %rsi */
-  /* syscall */
-
-  /* movb $1, fd_set */
-  /* mov $SYS_SELECT, %rax # select */
-  /* mov $1, %rdi # n */
-  /* mov $fd_set, %rsi # inp */
-  /* mov $0, %rdx # outp */
-  /* mov $0, %r10 # exp */
-  /* mov $select_timeval, %r8 # timeval */
-  /* syscall */
-
-  /* cmp $1, %rax */
-  /* jne .dont_read */
-
-  /* mov $SYS_READ, %rax # read */
-  /* mov $0, %rdi # stdin */
-  /* mov $buffer, %rsi */
-  /* mov $1, %rdx */
-  /* syscall */
-
-  /* mov $SYS_WRITE, %rax */
-  /* mov $1, %rdi */
-  /* mov $buffer, %rsi */
-  /* mov $1, %rdx */
-  /* syscall */
-
-  /* jmp .readkey */
-
-/* .dont_read: */
-  /* jmp .exit */
+  # framebuffer setup
 
   # open framebuffer
   mov $SYS_OPEN, %rax # open
@@ -230,6 +181,35 @@ main:
   syscall
   mov %rax, fb_map
 
+
+
+
+
+  # stdin setup
+
+  # get stdin termios
+  mov $SYS_IOCTL, %rax # ioctl
+  mov $0, %rdi # stdin
+  mov $TCGETS, %rsi # cmd
+  mov $termios, %rdx # dump in
+  syscall
+
+  # remove icanon & echo frmo termios
+  mov $ICANON_OR_ECHO, %r8d
+  not %r8d
+  and %r8d, termios_from_lflag
+
+  # set stdin termios (without icanon & echo)
+  mov $SYS_IOCTL, %rax # ioctl
+  mov $0, %rdi # stdin
+  mov $TCSETS, %rsi # cmd
+  mov $termios, %rdx # dump in
+  syscall
+
+
+
+
+
   # standard sleep is 1/30 s
   movb $0, sleep_timeval
   movl $33333333, sleep_timeval_nano
@@ -239,7 +219,18 @@ main:
 
 
 
+
+
+
+###########################
+####### MAIN LOOP #########
+###########################
+
+
 .main_loop:
+
+  # first tile blinking
+
   cmpb $0, BOARD
   je .blink_1
   movb $0, BOARD
@@ -247,10 +238,93 @@ main:
 .blink_1:
   movb $1, BOARD
 .blink_end:
-  call .draw_board
+
+
+
+
+
+
+  # handle key events
+
+.readkey:
+  movb $1, fd_set
+  mov $SYS_SELECT, %rax # select
+  mov $1, %rdi # n
+  mov $fd_set, %rsi # inp
+  mov $0, %rdx # outp
+  mov $0, %r10 # exp
+  mov $select_timeval, %r8 # timeval
+  syscall
+
+  cmp $1, %rax
+  jne .readkey_end
+
+  mov $SYS_READ, %rax # read
+  mov $0, %rdi # stdin
+  mov $buffer, %rsi
+  mov $1, %rdx
+  syscall
+
+  # exit on 'q'
+  cmp $113, buffer
+  je .exit
+
+  # handle ijkl as pacman direction change
+  cmp $105, buffer # i <=> up
+  je .go_up
+  cmp $106, buffer # j <=> left
+  je .go_left
+  cmp $107, buffer # k <=> down
+  je .go_down
+  cmp $108, buffer # l <=> right
+  je .go_right
+
+  # debug: print key press
+  /* mov $SYS_WRITE, %rax */
+  /* mov $1, %rdi */
+  /* mov $buffer, %rsi */
+  /* mov $1, %rdx */
+  /* syscall */
+
+  jmp .readkey
+
+.go_up:
+  movl $0, PACMAN_DIRECTION_X
+  movl $-1, PACMAN_DIRECTION_Y
+  jmp .readkey
+.go_left:
+  movl $-1, PACMAN_DIRECTION_X
+  movl $0, PACMAN_DIRECTION_Y
+  jmp .readkey
+.go_down:
+  movl $0, PACMAN_DIRECTION_X
+  movl $1, PACMAN_DIRECTION_Y
+  jmp .readkey
+.go_right:
+  movl $1, PACMAN_DIRECTION_X
+  movl $0, PACMAN_DIRECTION_Y
+  jmp .readkey
+
+.readkey_end:
+
+
+
+
+
 
   # move pacman
-  add $1, PACMAN_X
+  mov PACMAN_DIRECTION_X, %rax
+  addl %eax, PACMAN_X
+  mov PACMAN_DIRECTION_Y, %rax
+  addl %eax, PACMAN_Y
+
+
+
+
+
+  call .draw_board
+
+
 
   # sleep for 1/30 second
   mov $SYS_NANOSLEEP, %rax
@@ -259,6 +333,14 @@ main:
   syscall
 
   jmp .main_loop
+
+
+#####################################
+########## END MAIN LOOP ############
+#####################################
+
+
+
 
 
 
@@ -369,7 +451,7 @@ main:
 
 .get_tile_type: # x=r12, y=r13
                 # uses r14 (as board index).
-                # returns in r8
+                # returns in r8b
   mov $BOARD_WIDTH, %r14
   imul %r13, %r14
   add %r12, %r14
@@ -379,7 +461,7 @@ main:
 
 
 
-.set_tile_type: # x=r12, y=r13, type=r8
+.set_tile_type: # x=r12, y=r13, type=r8b
                 # uses r14 (as board index).
   mov $BOARD_WIDTH, %r14
   imul %r13, %r14
@@ -398,7 +480,7 @@ main:
 
 .draw_board__inc_x:
   call .get_tile_type
-  cmp $0, %r8
+  cmpb $0, %r8b
   jne .draw_board__not_wall
   jmp .draw_board__wall
 
