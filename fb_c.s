@@ -1,7 +1,7 @@
 .section .data
 
 fbdev: # framebuffer
-  .ascii "/dev/fb0"
+  .asciz "/dev/fb0"
 
 
 # SYSCALLS
@@ -19,14 +19,36 @@ fbdev: # framebuffer
 
 # SIGNALS
 
+.equ SIGHUP, 1
 .equ SIGINT, 2
+.equ SIGQUIT, 3
+.equ SIGILL, 4
+.equ SIGTRAP, 5
+.equ SIGABRT, 6  # sig of SIGIOT
+.equ SIGFPE, 8
+.equ SIGKILL, 9
+.equ SIGUSR1, 10
+.equ SIGSEGV, 11
+.equ SIGUSR2, 12
+.equ SIGPIPE, 13
+.equ SIGTERM, 15
+.equ SIGSTKFLT, 16
+.equ SIGCHLD, 17
+.equ SIGCONT, 18
+.equ SIGSTOP, 19
+.equ SIGTSTP, 20
+.equ SIGTTIN, 21
+.equ SIGTTOU, 22
 
+sig_array:  # 0 terminated
+  .byte SIGHUP, SIGINT, SIGQUIT, SIGILL, SIGTRAP, SIGABRT, SIGFPE, SIGKILL, SIGUSR1, SIGSEGV, SIGUSR2, SIGPIPE, SIGTERM, SIGSTKFLT, SIGCHLD, SIGCONT, SIGSTOP, SIGTSTP, SIGTTIN, SIGTTOU, 0
 
-sigaction_handler:
-  .quad .signal_handler
-  .quad 0x04000000   # SA_RESTORER - why?
+sigaction_handler:  # __rt_sigaction
+  .quad .signal_handler  # handler adresse
+  .quad 0x04000000   # flags = SA_RESTORER - warning: the doc is all fked up and says you need not to provide it if your calling sigaction directly as a syscall (& not the libc wrapper) -- its wrong, you need it for the kernel not to throw a EFAULT at you - on x64
   .quad 0
   .fill 128, 1, 0
+
 
 # IOCTL
 
@@ -197,17 +219,30 @@ main:
 
 
   # signal handlers - to restore stdin if anything goes wrong
+  mov $sig_array, %r15
+  mov $0, %rdi
+.install_signal_handler:
+  movb (%r15), %dil # signal number
+  cmp $0, %rdi # if the sig number is 0, we're at the end of the signal array: break off the loop
+  je .signal_handlers_installed
 
-  mov $SIGINT, %rdi  # signal number
+  # debug: display signal handler installed
+  /* mov %rdi, %rsi  # %rdi = caught signal code */
+  /* mov $signal_caught, %rdi */
+  /* xor %rax, %rax */
+  /* call printf */
+
   mov $sigaction_handler, %rsi  # sigaction act - new action
   mov $0, %rdx  # sigaction oact - old action
   mov $8, %r10  # sigsetsize
   mov $SYS_RT_SIGACTION, %rax
   syscall
 
+  # go to next signal inside [sig_array]
+  add $1, %r15
+  jmp .install_signal_handler
+.signal_handlers_installed:
 
-plop:
-  jmp plop
 
 
 
@@ -609,13 +644,12 @@ plop:
   ret
 
 
-.align 8
 .signal_handler: # print stuff, cleanup & exit
-  mov $SYS_WRITE, %rax
-  mov $1, %rdi # stdout
-  mov $signal_caught, %rsi
-  mov $signal_caught_len, %rdx
-  syscall
+  # print signal code
+  mov %rdi, %rsi  # %rdi = caught signal code
+  mov $signal_caught, %rdi
+  xor %rax, %rax
+  call printf
 
 
 
@@ -658,8 +692,7 @@ up_pressed:
 down_pressed:
   .asciz "down pressed"
 signal_caught:
-  .asciz "signal caught\n"
-  signal_caught_len = . - signal_caught
+  .asciz "signal caught: %d\n"
 clean_up_done:
   .asciz "state cleaned up\n"
   clean_up_done_len = . - clean_up_done
