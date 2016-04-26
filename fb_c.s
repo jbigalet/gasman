@@ -11,10 +11,22 @@ fbdev: # framebuffer
 .equ SYS_OPEN, 2
 .equ SYS_CLOSE, 3
 .equ SYS_MMAP, 9
+.equ SYS_RT_SIGACTION, 13
 .equ SYS_IOCTL, 16
 .equ SYS_SELECT, 23
 .equ SYS_NANOSLEEP, 35
 
+
+# SIGNALS
+
+.equ SIGINT, 2
+
+
+sigaction_handler:
+  .quad .signal_handler
+  .quad 0x04000000   # SA_RESTORER - why?
+  .quad 0
+  .fill 128, 1, 0
 
 # IOCTL
 
@@ -184,8 +196,25 @@ main:
 
 
 
+  # signal handlers - to restore stdin if anything goes wrong
 
-  # stdin setup
+  mov $SIGINT, %rdi  # signal number
+  mov $sigaction_handler, %rsi  # sigaction act - new action
+  mov $0, %rdx  # sigaction oact - old action
+  mov $8, %r10  # sigsetsize
+  mov $SYS_RT_SIGACTION, %rax
+  syscall
+
+
+plop:
+  jmp plop
+
+
+
+
+
+
+  # stdin setup - restored by signal handlers if anything goes wrong
 
   # get stdin termios
   mov $SYS_IOCTL, %rax # ioctl
@@ -267,7 +296,7 @@ main:
 
   # exit on 'q'
   cmp $113, buffer
-  je .exit
+  je .cleanup_and_exit
 
   # handle ijkl as pacman direction change
   cmp $105, buffer # i <=> up
@@ -580,13 +609,33 @@ main:
   ret
 
 
+.align 8
+.signal_handler: # print stuff, cleanup & exit
+  mov $SYS_WRITE, %rax
+  mov $1, %rdi # stdout
+  mov $signal_caught, %rsi
+  mov $signal_caught_len, %rdx
+  syscall
 
 
 
-.exit:
+
+.cleanup_and_exit:
+  # cleanup stdin state
+
+
+  # display cleanup state
+  mov $SYS_WRITE, %rax
+  mov $1, %rdi # stdout
+  mov $clean_up_done, %rsi
+  mov $clean_up_done_len, %rdx
+  syscall
+
+  # exit
   mov $60, %rax
   mov $0, %rdi
   syscall
+
 
 
 
@@ -608,3 +657,9 @@ up_pressed:
   .asciz "up pressed"
 down_pressed:
   .asciz "down pressed"
+signal_caught:
+  .asciz "signal caught\n"
+  signal_caught_len = . - signal_caught
+clean_up_done:
+  .asciz "state cleaned up\n"
+  clean_up_done_len = . - clean_up_done
