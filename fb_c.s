@@ -15,6 +15,7 @@ fbdev: # framebuffer
 .equ SYS_IOCTL, 16
 .equ SYS_SELECT, 23
 .equ SYS_NANOSLEEP, 35
+.equ SYS_ALARM, 37
 
 
 # SIGNALS
@@ -31,6 +32,7 @@ fbdev: # framebuffer
 .equ SIGSEGV, 11
 .equ SIGUSR2, 12
 .equ SIGPIPE, 13
+.equ SIGALARM, 14  # ctrl-c is not working as we're in raw mode, so we setup a watchdog (cf TIMEOUT)
 .equ SIGTERM, 15
 .equ SIGSTKFLT, 16
 .equ SIGCHLD, 17
@@ -41,13 +43,15 @@ fbdev: # framebuffer
 .equ SIGTTOU, 22
 
 sig_array:  # 0 terminated
-  .byte SIGHUP, SIGINT, SIGQUIT, SIGILL, SIGTRAP, SIGABRT, SIGFPE, SIGKILL, SIGUSR1, SIGSEGV, SIGUSR2, SIGPIPE, SIGTERM, SIGSTKFLT, SIGCHLD, SIGCONT, SIGSTOP, SIGTSTP, SIGTTIN, SIGTTOU, 0
+  .byte SIGHUP, SIGINT, SIGQUIT, SIGILL, SIGTRAP, SIGABRT, SIGFPE, SIGKILL, SIGUSR1, SIGSEGV, SIGUSR2, SIGPIPE, SIGALARM, SIGTERM, SIGSTKFLT, SIGCHLD, SIGCONT, SIGSTOP, SIGTSTP, SIGTTIN, SIGTTOU, 0
 
 sigaction_handler:  # __rt_sigaction
   .quad .signal_handler  # handler adresse
   .quad 0x04000000   # flags = SA_RESTORER - warning: the doc is all fked up and says you need not to provide it if your calling sigaction directly as a syscall (& not the libc wrapper) -- its wrong, you need it for the kernel not to throw a EFAULT at you - on x64
   .quad 0
   .fill 128, 1, 0
+
+.equ TIMEOUT, 10  # watchdog timeout - cf SIGALARM
 
 
 # IOCTL
@@ -163,6 +167,10 @@ main:
   mov %rsp, %rbp
 
 
+  # watchdog
+  mov $TIMEOUT, %rdi  # in seconds
+  mov $SYS_ALARM, %rax
+  syscall
 
 
   # framebuffer setup
