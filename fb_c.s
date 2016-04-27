@@ -52,11 +52,14 @@ sigaction_handler:  # __rt_sigaction
 
 # IOCTL
 
-.equ FBIOGET_VSCREENINFO, 17920
-.equ FBIOGET_FSCREENINFO, 17922
+.equ FBIOGET_VSCREENINFO, 17920  # get frame buffer virtal screen info
+.equ FBIOGET_FSCREENINFO, 17922  # get frame buffer fixed screen info
 
-.equ TCGETS, 0x5401
-.equ TCSETS, 0x5402
+.equ TCGETS, 0x5401  # get stdin termios
+.equ TCSETS, 0x5402  # set stdin termios
+
+.equ KDGKBMODE, 0x4B44  # get console keyboard mode
+.equ KDSKBMODE, 0x4B45  # set console keyboard mode
 
 
 # FLAGS
@@ -77,10 +80,18 @@ sigaction_handler:  # __rt_sigaction
 .lcomm sleep_timeval, 8
 .lcomm sleep_timeval_nano, 8
 
-termios:
+
+old_termios:  # termios backup, to allow restoration
+  .fill 36, 1, 0
+
+termios:  # termios with flag modification - will be set during execution
   .fill 12, 1, 0
 termios_from_lflag:
   .fill 24, 1, 0
+
+.equ K_MEDIUMRAW, 2  # keyboard mode
+oldkbmode:
+  .byte 255  # cant be 0 (0 == K_RAW)
 
 fd_set:
   .fill 128, 1, 0
@@ -251,7 +262,14 @@ main:
 
   # stdin setup - restored by signal handlers if anything goes wrong
 
-  # get stdin termios
+  # get stdin termios a first time - backup it to allow restoration latter
+  mov $SYS_IOCTL, %rax # ioctl
+  mov $0, %rdi # stdin
+  mov $TCGETS, %rsi # cmd
+  mov $old_termios, %rdx # dump in
+  syscall
+
+  # get stdin termios a second time - this one will be modified & set
   mov $SYS_IOCTL, %rax # ioctl
   mov $0, %rdi # stdin
   mov $TCGETS, %rsi # cmd
@@ -271,6 +289,27 @@ main:
   syscall
 
 
+  # keyboard mode alteration - will be restored even if -almost- anything goes wrong
+
+  # save old keyboard mode
+  mov $SYS_IOCTL, %rax # ioctl
+  mov $0, %rdi # stdin
+  mov $KDGKBMODE, %rsi # cmd
+  mov $oldkbmode, %rdx # dump in
+  syscall
+
+  # display old keyboard mode
+  mov $old_keyboard_mode, %rdi
+  mov oldkbmode, %rsi
+  xor %rax, %rax
+  call printf
+
+  # set keyboard mode as K_MEDIUMRAW
+  mov $SYS_IOCTL, %rax # ioctl
+  mov $0, %rdi # stdin
+  mov $KDSKBMODE, %rsi # cmd
+  mov $K_MEDIUMRAW, %rdx # dump in
+  syscall
 
 
 
@@ -655,14 +694,34 @@ main:
 
 
 .cleanup_and_exit:
-  # cleanup stdin state
+  # cleanup stdin & keyboard mode
 
+  # restore stdin termios
+  mov $SYS_IOCTL, %rax # ioctl
+  mov $0, %rdi # stdin
+  mov $TCSETS, %rsi # cmd
+  mov $old_termios, %rdx # dump in
+  syscall
 
-  # display cleanup state
+  # reassure the user (or maybe just me) - the stdin is clean
   mov $SYS_WRITE, %rax
   mov $1, %rdi # stdout
-  mov $clean_up_done, %rsi
-  mov $clean_up_done_len, %rdx
+  mov $stdin_restored, %rsi
+  mov $stdin_restored_len, %rdx
+  syscall
+
+  # restore keyboard mode
+  mov $SYS_IOCTL, %rax # ioctl
+  mov $0, %rdi # stdin
+  mov $KDSKBMODE, %rsi # cmd
+  mov oldkbmode, %rdx # dump in
+  syscall
+
+  # reassure the user (or maybe just me) - the stdin is clean
+  mov $SYS_WRITE, %rax
+  mov $1, %rdi # stdout
+  mov $keyboard_mode_restored, %rsi
+  mov $keyboard_mode_restored_len, %rdx
   syscall
 
   # exit
@@ -693,6 +752,11 @@ down_pressed:
   .asciz "down pressed"
 signal_caught:
   .asciz "signal caught: %d\n"
-clean_up_done:
-  .asciz "state cleaned up\n"
-  clean_up_done_len = . - clean_up_done
+stdin_restored:
+  .asciz "stdin mode restored\n"
+  stdin_restored_len = . - stdin_restored
+keyboard_mode_restored:
+  .asciz "keyboard mode restored\n"
+  keyboard_mode_restored_len = . - keyboard_mode_restored
+old_keyboard_mode:
+  .asciz "keyboard mode was: %d\n"
