@@ -316,7 +316,7 @@ main:
   mov $SYS_IOCTL, %rax # ioctl
   mov $0, %rdi # stdin
   mov $KDSKBMODE, %rsi # cmd
-  mov $K_MEDIUMRAW, %rdx # dump in
+  mov $K_MEDIUMRAW, %rdx # new mode
   syscall
 
 
@@ -377,25 +377,25 @@ main:
   syscall
 
   # exit on 'q'
-  cmp $113, buffer
+  cmpb $30, buffer
   je .cleanup_and_exit
 
   # handle ijkl as pacman direction change
-  cmp $105, buffer # i <=> up
+  cmpb $23, buffer # i <=> up
   je .go_up
-  cmp $106, buffer # j <=> left
+  cmp $36, buffer # j <=> left
   je .go_left
-  cmp $107, buffer # k <=> down
+  cmp $37, buffer # k <=> down
   je .go_down
-  cmp $108, buffer # l <=> right
+  cmp $38, buffer # l <=> right
   je .go_right
 
   # debug: print key press
-  /* mov $SYS_WRITE, %rax */
-  /* mov $1, %rdi */
-  /* mov $buffer, %rsi */
-  /* mov $1, %rdx */
-  /* syscall */
+  /* mov buffer, %rsi  # %rdi = caught signal code */
+  /* mov $key_pressed, %rdi */
+  /* xor %rax, %rax */
+  /* call printf */
+
 
   jmp .readkey
 
@@ -722,7 +722,9 @@ main:
   mov $SYS_IOCTL, %rax # ioctl
   mov $0, %rdi # stdin
   mov $KDSKBMODE, %rsi # cmd
-  mov oldkbmode, %rdx # dump in
+
+  mov $0, %rdx # as we only move one byte to rdl, 0 the rest
+  movb oldkbmode, %dl
   syscall
 
   # reassure the user (or maybe just me) - the stdin is clean
@@ -768,3 +770,5 @@ keyboard_mode_restored:
   keyboard_mode_restored_len = . - keyboard_mode_restored
 old_keyboard_mode:
   .asciz "keyboard mode was: %d\n"
+key_pressed:
+  .asciz "key pressed/released: %d\n"
