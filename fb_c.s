@@ -544,7 +544,7 @@ main:
   movl %r12d, PACMAN_X
   movl %r13d, PACMAN_Y
   movl $0, PACMAN_X_RATIO
-  movl $TILE_SIZE/2-2, PACMAN_Y_RATIO
+  movl $TILE_RESOLUTION/2, PACMAN_Y_RATIO
   # pacman tile defaults to empty
   mov $TILE_EMPTY, %r8
   jmp .read_board__set_tile
@@ -672,8 +672,8 @@ main:
 
   # draw pacman
 
-  mov $-PACMAN_SIZE/2, %r14
-  mov $-PACMAN_SIZE/2, %r15
+  mov $-PACMAN_SIZE/2+1, %r14
+  mov $-PACMAN_SIZE/2+1, %r15
   mov $0xff0000, %r9
 .pacman_draw_loop:
   imul $TILE_SIZE, PACMAN_X, %r10d
@@ -699,7 +699,7 @@ main:
   add $1, %r14
   cmp $PACMAN_SIZE/2, %r14
   jne .pacman_draw_loop
-  mov $-PACMAN_SIZE/2, %r14
+  mov $-PACMAN_SIZE/2+1, %r14
   add $1, %r15
   cmp $PACMAN_SIZE/2, %r15
   jne .pacman_draw_loop
