@@ -396,6 +396,21 @@ main:
 
 .handle_pacman_moves:
   # handle ijkl as pacman direction change
+
+  # only allow moves while on the middle of a tile
+  # or if pacman if standing still (ie at the start)
+  cmpl $0, PACMAN_DIRECTION_X
+  jne .is_pacman_centered
+  cmpl $0, PACMAN_DIRECTION_Y
+  je .pacman_can_change_direction
+
+.is_pacman_centered:
+  cmpl $TILE_RESOLUTION/2, PACMAN_X_RATIO
+  jne .readkey  # not horizontally centered
+  cmpl $TILE_RESOLUTION/2, PACMAN_Y_RATIO
+  jne .readkey  # not vertically centered
+
+.pacman_can_change_direction:
   cmpb $23, buffer # i <=> up
   je .go_up
   cmp $36, buffer # j <=> left
@@ -411,8 +426,8 @@ main:
   /* xor %rax, %rax */
   /* call printf */
 
-
   jmp .readkey
+
 
 .go_up:
   movl $0, PACMAN_DIRECTION_X
