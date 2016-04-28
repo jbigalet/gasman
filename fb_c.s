@@ -51,7 +51,7 @@ sigaction_handler:  # __rt_sigaction
   .quad 0
   .fill 128, 1, 0
 
-.equ TIMEOUT, 10  # watchdog timeout - cf SIGALARM
+.equ TIMEOUT, 30  # watchdog timeout - cf SIGALARM
 
 
 # IOCTL
@@ -71,6 +71,21 @@ sigaction_handler:  # __rt_sigaction
 .equ ICANON, 2
 .equ ECHO, 8
 .equ ICANON_OR_ECHO, 10
+
+
+# KEYS
+
+.equ KEY_Q, 30
+.equ KEY_G, 34
+.equ KEY_I, 23
+.equ KEY_J, 36
+.equ KEY_K, 37
+.equ KEY_L, 38
+
+.lcomm UP_PRESSED, 1
+.lcomm DOWN_PRESSED, 1
+.lcomm LEFT_PRESSED, 1
+.lcomm RIGHT_PRESSED, 1
 
 
 # MISC
@@ -366,6 +381,7 @@ main:
   # handle key events
 
 .readkey:
+  # check if we can read a key event from stdin (we cant directly read one as sys_read is blocking)
   movb $1, fd_set
   mov $SYS_SELECT, %rax # select
   mov $1, %rdi # n
@@ -378,76 +394,120 @@ main:
   cmp $1, %rax
   jne .readkey_end
 
+  # a key event is available - read it
   mov $SYS_READ, %rax # read
   mov $0, %rdi # stdin
   mov $buffer, %rsi
   mov $1, %rdx
   syscall
 
+
+  # debug: print key press
+  mov buffer, %rsi  # %rdi = caught signal code
+  mov $key_pressed, %rdi
+  xor %rax, %rax
+  call printf
+
+
   # exit on 'q'
-  cmpb $30, buffer
+  cmpb $KEY_Q, buffer
   je .cleanup_and_exit
 
   # toggle grid on 'g'
-  cmp $34, buffer
-  jne .handle_pacman_moves
+  cmp $KEY_G, buffer
+  jne .update_movement_key_status
   notb debug_grid_on
 
+.update_movement_key_status:
+  # update movement key status (= pressed while not released)
 
-.handle_pacman_moves:
+  # key code == lower 7 bits
+  # key status (pressed/released) = highest bit
+
+  # rax will contain the status
+  movb buffer, %al
+  notb %al
+  shr $7, %al
+
+  # rbx will contain the key code
+  movb buffer, %bl
+  andb $0x7f, %bl
+
+
+  cmpb $KEY_I, %bl # i <=> up
+  je .key_i_pressed
+  cmpb $KEY_J, %bl # j <=> left
+  je .key_j_pressed
+  cmpb $KEY_K, %bl # k <=> down
+  je .key_k_pressed
+  cmpb $KEY_L, %bl # l <=> right
+  je .key_l_pressed
+
+  jmp .readkey
+
+.key_i_pressed:
+  movb %al, UP_PRESSED
+  jmp .readkey
+.key_j_pressed:
+  movb %al, LEFT_PRESSED
+  jmp .readkey
+.key_k_pressed:
+  movb %al, DOWN_PRESSED
+  jmp .readkey
+.key_l_pressed:
+  movb %al, RIGHT_PRESSED
+  jmp .readkey
+
+.readkey_end:
+
+
   # handle ijkl as pacman direction change
 
   # only allow moves while on the middle of a tile
   # or if pacman if standing still (ie at the start)
+.handle_pacman_moves:
+
+  # check if pacman is standing still
   cmpl $0, PACMAN_DIRECTION_X
   jne .is_pacman_centered
   cmpl $0, PACMAN_DIRECTION_Y
   je .pacman_can_change_direction
 
+  # check if pacman is centered
 .is_pacman_centered:
   cmpl $TILE_RESOLUTION/2, PACMAN_X_RATIO
-  jne .readkey  # not horizontally centered
+  jne .handle_pacman_move_end # not horizontally centered
   cmpl $TILE_RESOLUTION/2, PACMAN_Y_RATIO
-  jne .readkey  # not vertically centered
+  jne .handle_pacman_move_end # not vertically centered
 
 .pacman_can_change_direction:
-  cmpb $23, buffer # i <=> up
+  cmpb $1, UP_PRESSED
   je .go_up
-  cmp $36, buffer # j <=> left
+  cmpb $1, LEFT_PRESSED
   je .go_left
-  cmp $37, buffer # k <=> down
+  cmpb $1, DOWN_PRESSED
   je .go_down
-  cmp $38, buffer # l <=> right
+  cmpb $1, RIGHT_PRESSED
   je .go_right
 
-  # debug: print key press
-  /* mov buffer, %rsi  # %rdi = caught signal code */
-  /* mov $key_pressed, %rdi */
-  /* xor %rax, %rax */
-  /* call printf */
-
-  jmp .readkey
-
+  jmp .handle_pacman_move_end
 
 .go_up:
   movl $0, PACMAN_DIRECTION_X
   movl $-1, PACMAN_DIRECTION_Y
-  jmp .readkey
+  jmp .handle_pacman_move_end
 .go_left:
   movl $-1, PACMAN_DIRECTION_X
   movl $0, PACMAN_DIRECTION_Y
-  jmp .readkey
+  jmp .handle_pacman_move_end
 .go_down:
   movl $0, PACMAN_DIRECTION_X
   movl $1, PACMAN_DIRECTION_Y
-  jmp .readkey
+  jmp .handle_pacman_move_end
 .go_right:
   movl $1, PACMAN_DIRECTION_X
   movl $0, PACMAN_DIRECTION_Y
-  jmp .readkey
-
-.readkey_end:
-
+.handle_pacman_move_end:
 
 
 
@@ -866,14 +926,6 @@ linelen:
   .asciz "linelen: %d\n"
 wallfile:
   .asciz "walls"
-left_pressed:
-  .asciz "left pressed"
-right_pressed:
-  .asciz "right pressed"
-up_pressed:
-  .asciz "up pressed"
-down_pressed:
-  .asciz "down pressed"
 signal_caught:
   .asciz "signal caught: %d\n"
 stdin_restored:
