@@ -481,6 +481,10 @@ main:
   jne .handle_pacman_move_end # not vertically centered
 
 .pacman_can_change_direction:
+  # store PACMAN_X & PACMAN_Y in r12 & r13 to easily check later if the next tile got no walls
+  movl PACMAN_X, %r12d
+  movl PACMAN_Y, %r13d
+
   cmpb $1, UP_PRESSED
   je .go_up
   cmpb $1, LEFT_PRESSED
@@ -490,23 +494,56 @@ main:
   cmpb $1, RIGHT_PRESSED
   je .go_right
 
+  # no direction change: check if pacman can go straight, if not stop him
+  addl PACMAN_DIRECTION_X, %r12d
+  addl PACMAN_DIRECTION_Y, %r13d
+  call .get_tile_type
+  cmpb $TILE_WALL, %r8b
+  jne .handle_pacman_move_end
+  movl $0, PACMAN_DIRECTION_X
+  movl $0, PACMAN_DIRECTION_Y
   jmp .handle_pacman_move_end
 
+# for every new direction, check if there is no wall there
 .go_up:
+  dec %r13d
+  call .get_tile_type
+  cmpb $TILE_WALL, %r8b
+  je .handle_pacman_move_end
+
   movl $0, PACMAN_DIRECTION_X
   movl $-1, PACMAN_DIRECTION_Y
   jmp .handle_pacman_move_end
+
 .go_left:
+  dec %r12d
+  call .get_tile_type
+  cmpb $TILE_WALL, %r8b
+  je .handle_pacman_move_end
+
   movl $-1, PACMAN_DIRECTION_X
   movl $0, PACMAN_DIRECTION_Y
   jmp .handle_pacman_move_end
+
 .go_down:
+  inc %r13d
+  call .get_tile_type
+  cmpb $TILE_WALL, %r8b
+  je .handle_pacman_move_end
+
   movl $0, PACMAN_DIRECTION_X
   movl $1, PACMAN_DIRECTION_Y
   jmp .handle_pacman_move_end
+
 .go_right:
+  inc %r12d
+  call .get_tile_type
+  cmpb $TILE_WALL, %r8b
+  je .handle_pacman_move_end
+
   movl $1, PACMAN_DIRECTION_X
   movl $0, PACMAN_DIRECTION_Y
+
 .handle_pacman_move_end:
 
 
@@ -713,7 +750,7 @@ main:
 
 .draw_board__inc_x:
   call .get_tile_type
-  cmpb $0, %r8b
+  cmpb $TILE_WALL, %r8b
   jne .draw_board__not_wall
   jmp .draw_board__wall
 
