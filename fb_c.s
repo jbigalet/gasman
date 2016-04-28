@@ -106,6 +106,8 @@ fd_set:
 
 .equ TILE_SIZE, 16
 
+.equ TILE_RESOLUTION, 10
+
 .equ BOARD_WIDTH, 28
 .equ BOARD_HEIGHT, 36
 
@@ -113,6 +115,8 @@ fd_set:
 .equ PIX_HEIGHT, BOARD_HEIGHT*TILE_SIZE
 
 .lcomm BOARD, BOARD_WIDTH*BOARD_HEIGHT
+
+.equ PACMAN_SIZE, 12
 
 
 # TILE TYPES
@@ -128,11 +132,14 @@ fd_set:
 
 
 # STATE
-# positions are in pixels, except for the corners
+# positions are in tiles + ratio/TILE_RESOLUTION
 
   # pacman
 .lcomm PACMAN_X, 4
+.lcomm PACMAN_X_RATIO, 4
 .lcomm PACMAN_Y, 4
+.lcomm PACMAN_Y_RATIO, 4
+
 .lcomm PACMAN_DIRECTION_X, 4
 .lcomm PACMAN_DIRECTION_Y, 4
 
@@ -424,10 +431,42 @@ main:
 
 
   # move pacman
+
   mov PACMAN_DIRECTION_X, %rax
-  addl %eax, PACMAN_X
+  addl %eax, PACMAN_X_RATIO
+
+  # if x_ratio >= resolution, then x++
+  cmpl $TILE_RESOLUTION, PACMAN_X_RATIO
+  jne .check_pacman_x_min
+  movl $0, PACMAN_X_RATIO
+  addl $1, PACMAN_X
+  jmp .move_pacman_y
+
+.check_pacman_x_min:
+  # if x_ratio < 0, then x--
+  cmpl $-1, PACMAN_X_RATIO
+  jne .move_pacman_y
+  movl $TILE_RESOLUTION-1, PACMAN_X_RATIO
+  subl $1, PACMAN_X
+
+.move_pacman_y:
   mov PACMAN_DIRECTION_Y, %rax
-  addl %eax, PACMAN_Y
+  addl %eax, PACMAN_Y_RATIO
+
+  # if y_ratio >= resolution, then y++
+  cmpl $TILE_RESOLUTION, PACMAN_Y_RATIO
+  jne .check_pacman_y_min
+  movl $0, PACMAN_Y_RATIO
+  addl $1, PACMAN_Y
+  jmp .move_pacman_end
+
+.check_pacman_y_min:
+  # if y_ratio < 0, then y--
+  cmpl $-1, PACMAN_Y_RATIO
+  jne .move_pacman_end
+  movl $TILE_RESOLUTION-1, PACMAN_Y_RATIO
+  subl $1, PACMAN_Y
+.move_pacman_end:
 
 
 
@@ -494,10 +533,10 @@ main:
   jmp .read_board__set_tile
 .read_board__pacman:
   # set pacman pos
-  imul $TILE_SIZE, %r12, %r14
-  movl %r14d, PACMAN_X
-  imul $TILE_SIZE, %r13, %r14
-  movl %r14d, PACMAN_Y
+  movl %r12d, PACMAN_X
+  movl %r13d, PACMAN_Y
+  movl $0, PACMAN_X_RATIO
+  movl $TILE_SIZE/2-2, PACMAN_Y_RATIO
   # pacman tile defaults to empty
   mov $TILE_EMPTY, %r8
   jmp .read_board__set_tile
@@ -622,23 +661,39 @@ main:
   # TODO ghosts
 
 
+
   # draw pacman
 
-  mov $0, %r14
-  mov $0, %r15
+  mov $-PACMAN_SIZE/2, %r14
+  mov $-PACMAN_SIZE/2, %r15
   mov $0xff0000, %r9
 .pacman_draw_loop:
-  movl PACMAN_X, %r10d
+  imul $TILE_SIZE, PACMAN_X, %r10d
+  mov $0, %rdx
+  mov $0, %rax
+  imul $TILE_SIZE, PACMAN_X_RATIO, %eax
+  mov $TILE_RESOLUTION, %rcx
+  idiv %rcx
+  add %eax, %r10d
+
+  imul $TILE_SIZE, PACMAN_Y, %r11d
+  mov $0, %rdx
+  mov $0, %rax
+  imul $TILE_SIZE, PACMAN_Y_RATIO, %eax
+  mov $TILE_RESOLUTION, %rcx
+  idiv %rcx
+  add %eax, %r11d
+
   add %r14, %r10
-  movl PACMAN_Y, %r11d
   add %r15, %r11
+
   call .draw_pixel
   add $1, %r14
-  cmp $10, %r14
+  cmp $PACMAN_SIZE/2, %r14
   jne .pacman_draw_loop
-  mov $0, %r14
+  mov $-PACMAN_SIZE/2, %r14
   add $1, %r15
-  cmp $10, %r15
+  cmp $PACMAN_SIZE/2, %r15
   jne .pacman_draw_loop
 
   # board is drawn (hopefully)
