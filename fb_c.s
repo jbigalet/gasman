@@ -84,6 +84,7 @@ sigaction_handler:  # __rt_sigaction
 .lcomm sleep_timeval, 8
 .lcomm sleep_timeval_nano, 8
 
+.lcomm debug_grid_on, 1
 
 old_termios:  # termios backup, to allow restoration
   .fill 36, 1, 0
@@ -387,6 +388,13 @@ main:
   cmpb $30, buffer
   je .cleanup_and_exit
 
+  # toggle grid on 'g'
+  cmp $34, buffer
+  jne .handle_pacman_moves
+  notb debug_grid_on
+
+
+.handle_pacman_moves:
   # handle ijkl as pacman direction change
   cmpb $23, buffer # i <=> up
   je .go_up
@@ -695,6 +703,42 @@ main:
   add $1, %r15
   cmp $PACMAN_SIZE/2, %r15
   jne .pacman_draw_loop
+
+
+  # draw debug grid
+  cmp $0, debug_grid_on
+  je .draw_debug_end
+
+  mov $0x000000, %r9
+
+  # draw lines
+  mov $0, %r10  # x in pixels
+  mov $0, %r11  # y in pixels
+.draw_debug_x:
+  call .draw_pixel
+  inc %r10
+  cmp $PIX_WIDTH, %r10
+  jne .draw_debug_x
+  mov $0, %r10
+  add $TILE_SIZE, %r11
+  cmp $PIX_HEIGHT, %r11
+  jne .draw_debug_x
+
+  # draw columns
+  mov $0, %r10
+  mov $0, %r11
+.draw_debug_y:
+  call .draw_pixel
+  inc %r11
+  cmp $PIX_HEIGHT, %r11
+  jne .draw_debug_y
+  mov $0, %r11
+  add $TILE_SIZE, %r10
+  cmp $PIX_WIDTH, %r10
+  jne .draw_debug_y
+.draw_debug_end:
+
+
 
   # board is drawn (hopefully)
   ret
