@@ -634,6 +634,44 @@ main:
 
 
 
+
+
+  # check pacman position for stuff (dots, energizers & ghosts)
+
+  movl PACMAN_X, %r12d
+  movl PACMAN_Y, %r13d
+  call .get_tile_type
+
+  # dot
+  mov %r8b, %r9b
+  andb $TILE_DOT, %r9b
+  cmpb $0, %r9b
+  jne .pacman_event__dot
+
+  # energizer
+  mov %r8b, %r9b
+  andb $TILE_ENERGIZE, %r9b
+  cmpb $0, %r9b
+  jne .pacman_event__energizer
+
+  jmp .pacman_event__end
+
+
+.pacman_event__dot:
+  mov $TILE_DOT, %r8b
+  call .remove_flags_from_tile
+  jmp .pacman_event__end
+
+.pacman_event__energizer:
+  mov $TILE_ENERGIZE, %r8b
+  call .remove_flags_from_tile
+  jmp .pacman_event__end
+
+.pacman_event__end:
+
+
+
+
   call .draw_board
 
 
@@ -839,6 +877,32 @@ main:
   add %r12, %r14
   movb %r8b, BOARD(%r14)
   ret
+
+
+.add_flags_to_tile: # x=r12, y=r13, flags=r8b
+                    # no index overflow is allowed
+                    # uses r14 (as board index).
+  mov $BOARD_WIDTH, %r14
+  imul %r13, %r14
+  add %r12, %r14
+  orb %r8b, BOARD(%r14)
+  ret
+
+
+.remove_flags_from_tile: # x=r12, y=r13, flags=r8b
+                         # no index overflow is allowed
+                         # uses r14 (as board index).
+
+  mov $BOARD_WIDTH, %r14
+  imul %r13, %r14
+  add %r12, %r14
+  notb %r8b
+  andb %r8b, BOARD(%r14)
+
+  notb %r8b  # restore r8 register
+
+  ret
+
 
 
 
