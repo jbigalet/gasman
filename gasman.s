@@ -602,6 +602,36 @@ main:
 
 
 
+  # if pacman position overflows, wrap indexes
+
+  # check if y < 0
+  cmpl $0, PACMAN_Y
+  jge .pacman_overflow_check__y_sup_0
+  addl $BOARD_HEIGHT, PACMAN_Y  # y < 0 => y = height + y
+  jmp .pacman_overflow_check__y_inf_height
+
+.pacman_overflow_check__y_sup_0:
+  # check if y >= height
+  cmpl $BOARD_HEIGHT, PACMAN_Y
+  jl .pacman_overflow_check__y_inf_height
+  subl $BOARD_HEIGHT, PACMAN_Y # y >= height => y = y - height
+.pacman_overflow_check__y_inf_height:
+
+  # check if x < 0
+  cmpl $0, PACMAN_X
+  jge .pacman_overflow_check__x_sup_0
+  addl $BOARD_WIDTH, PACMAN_X  # x < 0 => x = width + x
+  jmp .pacman_overflow_check__x_inf_height
+
+.pacman_overflow_check__x_sup_0:
+  # check if x >= width
+  cmpl $BOARD_WIDTH, PACMAN_X
+  jl .pacman_overflow_check__x_inf_height
+  subl $BOARD_WIDTH, PACMAN_X # x >= width => x = x - width
+.pacman_overflow_check__x_inf_height:
+
+
+
 
 
   call .draw_board
@@ -754,17 +784,55 @@ main:
 
 .get_tile_type: # x=r12, y=r13
                 # uses r14 (as board index).
+                # x & y can overflow (ie <0 or >board_width/height - they be wrapped
                 # returns in r8b
+
+  # backup indexes as we'll modify them if they overflow
+  push %r12
+  push %r13
+
+  # check if y < 0
+  cmpl $0, %r13d
+  jge .get_tile_type__y_sup_0
+  addl $BOARD_HEIGHT, %r13d  # y < 0 => y = height + y
+  jmp .get_tile_type__y_inf_height
+
+.get_tile_type__y_sup_0:
+  # check if y >= height
+  cmpl $BOARD_HEIGHT, %r13d
+  jl .get_tile_type__y_inf_height
+  subl $BOARD_HEIGHT, %r13d # y >= height => y = y - height
+.get_tile_type__y_inf_height:
+
+  # check if x < 0
+  cmpl $0, %r12d
+  jge .get_tile_type__x_sup_0
+  addl $BOARD_WIDTH, %r12d  # x < 0 => x = width + x
+  jmp .get_tile_type__x_inf_height
+
+.get_tile_type__x_sup_0:
+  # check if x >= width
+  cmpl $BOARD_WIDTH, %r12d
+  jl .get_tile_type__x_inf_height
+  subl $BOARD_WIDTH, %r12d # x >= width => x = x - width
+.get_tile_type__x_inf_height:
+
   mov $BOARD_WIDTH, %r14
   imul %r13, %r14
   add %r12, %r14
   movb BOARD(%r14), %r8b
+
+  # restore indexes
+  pop %r13
+  pop %r12
+
   ret
 
 
 
 
 .set_tile_type: # x=r12, y=r13, type=r8b
+                # no index overflow is allowed
                 # uses r14 (as board index).
   mov $BOARD_WIDTH, %r14
   imul %r13, %r14
@@ -872,7 +940,7 @@ main:
   add %r14, %r10
   add %r15, %r11
 
-  call .draw_pixel
+  call .draw_pixel_with_overflow_checks
   add $1, %r14
   cmp $PACMAN_SIZE/2, %r14
   jne .pacman_draw_loop
@@ -937,6 +1005,49 @@ main:
   add fb_map, %rcx
 
   movl %r9d, (%rcx)
+  ret
+
+
+
+.draw_pixel_with_overflow_checks:  # like .draw_pixel, but with overflow checks
+                                   # 2 different functions are made as we dont want the useless checks in draw_pixel if we're sure there are no overflows
+
+  # backup x & y
+  push %r10
+  push %r11
+
+  # check if y < 0
+  cmp $0, %r11
+  jge .draw_pixel_overflow_check__y_sup_0
+  add $PIX_HEIGHT, %r11  # y < 0 => y = height + y
+  jmp .draw_pixel_overflow_check__y_inf_height
+
+.draw_pixel_overflow_check__y_sup_0:
+  # check if y >= height
+  cmp $PIX_HEIGHT, %r11
+  jl .draw_pixel_overflow_check__y_inf_height
+  sub $PIX_HEIGHT, %r11 # y >= height => y = y - height
+.draw_pixel_overflow_check__y_inf_height:
+
+  # check if x < 0
+  cmp $0, %r10
+  jge .draw_pixel_overflow_check__x_sup_0
+  add $PIX_WIDTH, %r10  # x < 0 => x = width + x
+  jmp .draw_pixel_overflow_check__x_inf_height
+
+.draw_pixel_overflow_check__x_sup_0:
+  # check if x >= width
+  cmp $PIX_WIDTH, %r10
+  jl .draw_pixel_overflow_check__x_inf_height
+  sub $PIX_WIDTH, %r10 # x >= width => x = x - width
+.draw_pixel_overflow_check__x_inf_height:
+
+  call .draw_pixel
+
+  # restore x & y
+  pop %r11
+  pop %r10
+
   ret
 
 
