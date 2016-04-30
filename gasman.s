@@ -137,16 +137,15 @@ fd_set:
 .equ PACMAN_SIZE, 12
 
 
-# TILE TYPES
+# TILE TYPES - as flags
 
-.equ TILE_WALL, 0 # #
-.equ TILE_NOHUP, 1 # _
-.equ TILE_DOT, 2 # .
-.equ TILE_EMPTY, 3 # <SPACE>
-.equ TILE_TUNNEL, 4 # T
-.equ TILE_ENERGIZE, 5 # O
-.equ TILE_GHOST_WALL, 6 # ^
-.equ TILE_NOHUP_AND_DOT, 7 # |
+# TILE_EMPTY (<SPACE>) => no flag
+.equ TILE_WALL, 0x01 # #
+.equ TILE_GHOST_WALL, 0x02
+.equ TILE_DOT, 0x04 # .     or, if nohup + dot: |
+.equ TILE_ENERGIZE, 0x08 # O
+.equ TILE_TUNNEL, 0x10 # T
+.equ TILE_NOHUP, 0x20 # _
 
 
 # STATE
@@ -502,8 +501,9 @@ main:
 .go_up:
   dec %r13d
   call .get_tile_type
-  cmpb $TILE_WALL, %r8b
-  je .pacman_direction_safety_check
+  andb $(TILE_WALL | TILE_GHOST_WALL), %r8b
+  cmpb $0, %r8b  # ie %r8b doesnt contain any wall flag
+  jne .pacman_direction_safety_check
 
   movl $0, PACMAN_DIRECTION_X
   movl $-1, PACMAN_DIRECTION_Y
@@ -512,8 +512,9 @@ main:
 .go_left:
   dec %r12d
   call .get_tile_type
-  cmpb $TILE_WALL, %r8b
-  je .pacman_direction_safety_check
+  andb $(TILE_WALL | TILE_GHOST_WALL), %r8b
+  cmpb $0, %r8b  # ie %r8b doesnt contain any wall flag
+  jne .pacman_direction_safety_check
 
   movl $-1, PACMAN_DIRECTION_X
   movl $0, PACMAN_DIRECTION_Y
@@ -522,8 +523,9 @@ main:
 .go_down:
   inc %r13d
   call .get_tile_type
-  cmpb $TILE_WALL, %r8b
-  je .pacman_direction_safety_check
+  andb $(TILE_WALL | TILE_GHOST_WALL), %r8b
+  cmpb $0, %r8b  # ie %r8b doesnt contain any wall flag
+  jne .pacman_direction_safety_check
 
   movl $0, PACMAN_DIRECTION_X
   movl $1, PACMAN_DIRECTION_Y
@@ -532,8 +534,9 @@ main:
 .go_right:
   inc %r12d
   call .get_tile_type
-  cmpb $TILE_WALL, %r8b
-  je .pacman_direction_safety_check
+  andb $(TILE_WALL | TILE_GHOST_WALL), %r8b
+  cmpb $0, %r8b  # ie %r8b doesnt contain any wall flag
+  jne .pacman_direction_safety_check
 
   movl $1, PACMAN_DIRECTION_X
   movl $0, PACMAN_DIRECTION_Y
@@ -547,8 +550,9 @@ main:
   addl PACMAN_DIRECTION_X, %r12d
   addl PACMAN_DIRECTION_Y, %r13d
   call .get_tile_type
-  cmpb $TILE_WALL, %r8b
-  jne .handle_pacman_move_end
+  andb $(TILE_WALL | TILE_GHOST_WALL), %r8b
+  cmpb $0, %r8b  # ie %r8b doesnt contain any wall flag
+  je .handle_pacman_move_end
   movl $0, PACMAN_DIRECTION_X
   movl $0, PACMAN_DIRECTION_Y
   jmp .handle_pacman_move_end
@@ -654,11 +658,69 @@ main:
   cmpb $71, buffer # G == pacman
   je .read_board__pacman
 
-  jmp .read_board__not_wall # == unknown
+  cmpb $32, buffer # <space> == empty
+  je .read_board__empty
+
+  cmpb $46, buffer # . == dot
+  je .read_board__dot
+
+  cmpb $79, buffer # O == energizer
+  je .read_board__energizer
+
+  cmpb $95, buffer # _ == no hup
+  je .read_board__nohup
+
+  cmpb $124, buffer # | == no hup + dot
+  je .read_board__nohup_and_dot
+
+  cmpb $84, buffer # T == tunnel
+  je .read_board__tunnel
+
+  cmpb $94, buffer # ^ == ghost wall
+  je .read_board__ghost_wall
+
+  /* cmpb $46, buffer # . == dot */
+  /* je .read_board__dot */
+
+  /* cmpb $46, buffer # . == dot */
+  /* je .read_board__dot */
+
+  jmp .read_board__empty # == unknown
+
+
+
+.read_board__empty:
+  mov $0, %r8
+  jmp .read_board__set_tile
 
 .read_board__wall:
   mov $TILE_WALL, %r8
   jmp .read_board__set_tile
+
+.read_board__dot:
+  mov $TILE_DOT, %r8
+  jmp .read_board__set_tile
+
+.read_board__energizer:
+  mov $TILE_ENERGIZE, %r8
+  jmp .read_board__set_tile
+
+.read_board__nohup:
+  mov $TILE_NOHUP, %r8
+  jmp .read_board__set_tile
+
+.read_board__nohup_and_dot:
+  mov $(TILE_NOHUP | TILE_DOT), %r8
+  jmp .read_board__set_tile
+
+.read_board__tunnel:
+  mov $TILE_TUNNEL, %r8
+  jmp .read_board__set_tile
+
+.read_board__ghost_wall:
+  mov $TILE_GHOST_WALL, %r8
+  jmp .read_board__set_tile
+
 .read_board__pacman:
   # set pacman pos
   movl %r12d, PACMAN_X
@@ -666,11 +728,9 @@ main:
   movl $0, PACMAN_X_RATIO
   movl $TILE_RESOLUTION/2, PACMAN_Y_RATIO
   # pacman tile defaults to empty
-  mov $TILE_EMPTY, %r8
+  mov $0, %r8
   jmp .read_board__set_tile
-.read_board__not_wall:
-  mov $TILE_EMPTY, %r8
-  jmp .read_board__set_tile
+
 
 .read_board__set_tile:
   call .set_tile_type
@@ -688,41 +748,6 @@ main:
   syscall
   ret
 
-
-  /* je .bluetile */
-  /* cmpb $46, buffer */
-  /* je .greytile */
-  /* cmpb $124, buffer */
-  /* je .greytile */
-  /* cmpb $71, buffer */
-  /* je .yellowtile */
-  /* cmpb $79, buffer */
-  /* je .beigetile */
-  /* cmpb $94, buffer */
-  /* je .redtile */
-  /* jmp .blacktile */
-
-/* .bluetile: */
-  /* mov $0x0000ff, %r9 */
-  /* jmp .aftercolor */
-/* .blacktile: */
-  /* mov $0x000000, %r9 */
-  /* jmp .aftercolor */
-/* .greytile: */
-  /* mov $0x555555, %r9 */
-  /* jmp .aftercolor */
-/* .yellowtile: */
-  /* mov $0xffff00, %r9 */
-  /* jmp .aftercolor */
-/* .redtile: */
-  /* mov $0xff0000, %r9 */
-  /* jmp .aftercolor */
-/* .beigetile: */
-  /* mov $0xf5f5dc, %r9 */
-  /* jmp .aftercolor */
-/* .aftercolor: */
-  /* call .draw_unicolor_tile */
-  /* jmp .readwalls */
 
 
 
@@ -758,19 +783,51 @@ main:
 
 .draw_board__inc_x:
   call .get_tile_type
+
   cmpb $TILE_WALL, %r8b
-  jne .draw_board__not_wall
-  jmp .draw_board__wall
+  je .draw_board__wall
+
+  cmpb $TILE_GHOST_WALL, %r8b
+  je .draw_board__ghost_wall
+
+  mov %r8b, %r9b
+  andb $TILE_DOT, %r9b
+  cmpb $0, %r9b
+  jne .draw_board__dot
+
+  mov %r8b, %r9b
+  andb $TILE_ENERGIZE, %r9b
+  cmpb $0, %r9b
+  jne .draw_board__energize
+
+  jmp .draw_board__empty
+
 
 .draw_board__wall:
   mov $0x0000ff, %r9
   call .draw_unicolor_tile
   jmp .draw_board__afterdraw
 
-.draw_board__not_wall:
+.draw_board__ghost_wall:
+  mov $0x000044, %r9
+  call .draw_unicolor_tile
+  jmp .draw_board__afterdraw
+
+.draw_board__dot:
+  mov $0xbbbbbb, %r9
+  call .draw_unicolor_tile
+  jmp .draw_board__afterdraw
+
+.draw_board__energize:
+  mov $0x666666, %r9
+  call .draw_unicolor_tile
+  jmp .draw_board__afterdraw
+
+.draw_board__empty:
   mov $0xffffff, %r9
   call .draw_unicolor_tile
   jmp .draw_board__afterdraw
+
 
 .draw_board__afterdraw:
   add $1, %r12
