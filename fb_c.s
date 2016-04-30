@@ -90,6 +90,8 @@ sigaction_handler:  # __rt_sigaction
 
 # MISC
 
+.equ FRAME_TIMEOUT, 16666666
+
 .lcomm fb_handle, 8
 .lcomm screensize, 8
 .lcomm fb_map, 8
@@ -122,7 +124,7 @@ fd_set:
 
 .equ TILE_SIZE, 16
 
-.equ TILE_RESOLUTION, 10
+.equ TILE_RESOLUTION, 8
 
 .equ BOARD_WIDTH, 28
 .equ BOARD_HEIGHT, 36
@@ -344,9 +346,9 @@ main:
 
 
 
-  # standard sleep is 1/30 s
+  # standard sleep is 1/60 s
   movb $0, sleep_timeval
-  movl $33333333, sleep_timeval_nano
+  movl $FRAME_TIMEOUT, sleep_timeval_nano
 
   call .read_board_from_file
 
@@ -403,10 +405,10 @@ main:
 
 
   # debug: print key press
-  mov buffer, %rsi  # %rdi = caught signal code
-  mov $key_pressed, %rdi
-  xor %rax, %rax
-  call printf
+  /* mov buffer, %rsi  # %rdi = caught signal code */
+  /* mov $key_pressed, %rdi */
+  /* xor %rax, %rax */
+  /* call printf */
 
 
   # exit on 'q'
@@ -494,7 +496,54 @@ main:
   cmpb $1, RIGHT_PRESSED
   je .go_right
 
-  # no direction change: check if pacman can go straight, if not stop him
+  jmp .pacman_direction_safety_check
+
+# for every new direction, check if there is no wall there
+.go_up:
+  dec %r13d
+  call .get_tile_type
+  cmpb $TILE_WALL, %r8b
+  je .pacman_direction_safety_check
+
+  movl $0, PACMAN_DIRECTION_X
+  movl $-1, PACMAN_DIRECTION_Y
+  jmp .pacman_direction_safety_check
+
+.go_left:
+  dec %r12d
+  call .get_tile_type
+  cmpb $TILE_WALL, %r8b
+  je .pacman_direction_safety_check
+
+  movl $-1, PACMAN_DIRECTION_X
+  movl $0, PACMAN_DIRECTION_Y
+  jmp .pacman_direction_safety_check
+
+.go_down:
+  inc %r13d
+  call .get_tile_type
+  cmpb $TILE_WALL, %r8b
+  je .pacman_direction_safety_check
+
+  movl $0, PACMAN_DIRECTION_X
+  movl $1, PACMAN_DIRECTION_Y
+  jmp .pacman_direction_safety_check
+
+.go_right:
+  inc %r12d
+  call .get_tile_type
+  cmpb $TILE_WALL, %r8b
+  je .pacman_direction_safety_check
+
+  movl $1, PACMAN_DIRECTION_X
+  movl $0, PACMAN_DIRECTION_Y
+
+.pacman_direction_safety_check:
+
+  # safety check: recheck if we really can go in the 'new' direction
+  # allow to check if there was no direction change (both case of not pressing any keys and pressing the key not changing our direction) - if there is still a wall in front of us, stop pacman
+  movl PACMAN_X, %r12d
+  movl PACMAN_Y, %r13d
   addl PACMAN_DIRECTION_X, %r12d
   addl PACMAN_DIRECTION_Y, %r13d
   call .get_tile_type
@@ -504,48 +553,7 @@ main:
   movl $0, PACMAN_DIRECTION_Y
   jmp .handle_pacman_move_end
 
-# for every new direction, check if there is no wall there
-.go_up:
-  dec %r13d
-  call .get_tile_type
-  cmpb $TILE_WALL, %r8b
-  je .handle_pacman_move_end
-
-  movl $0, PACMAN_DIRECTION_X
-  movl $-1, PACMAN_DIRECTION_Y
-  jmp .handle_pacman_move_end
-
-.go_left:
-  dec %r12d
-  call .get_tile_type
-  cmpb $TILE_WALL, %r8b
-  je .handle_pacman_move_end
-
-  movl $-1, PACMAN_DIRECTION_X
-  movl $0, PACMAN_DIRECTION_Y
-  jmp .handle_pacman_move_end
-
-.go_down:
-  inc %r13d
-  call .get_tile_type
-  cmpb $TILE_WALL, %r8b
-  je .handle_pacman_move_end
-
-  movl $0, PACMAN_DIRECTION_X
-  movl $1, PACMAN_DIRECTION_Y
-  jmp .handle_pacman_move_end
-
-.go_right:
-  inc %r12d
-  call .get_tile_type
-  cmpb $TILE_WALL, %r8b
-  je .handle_pacman_move_end
-
-  movl $1, PACMAN_DIRECTION_X
-  movl $0, PACMAN_DIRECTION_Y
-
 .handle_pacman_move_end:
-
 
 
 
