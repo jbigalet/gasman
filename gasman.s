@@ -151,36 +151,29 @@ fd_set:
 # STATE
 # positions are in tiles + ratio/TILE_RESOLUTION
 
-  # pacman
-.lcomm PACMAN_X, 4
-.lcomm PACMAN_X_RATIO, 4
-.lcomm PACMAN_Y, 4
-.lcomm PACMAN_Y_RATIO, 4
+  # pacman & ghosts got the same struct discribed below,
+  # excepts that pacman doesnt have a home corner tile
+  # note: everything is 4 byte
+.equ CHAR_X, 0
+.equ CHAR_X_RATIO, 4
+.equ CHAR_Y, 8
+.equ CHAR_Y_RATIO, 12
+.equ CHAR_DIRECTION_X, 16
+.equ CHAR_DIRECTION_Y, 20
+.equ CHAR_CORNER_TILE_X, 24
+.equ CHAR_CORNER_TILE_Y, 28
 
-.lcomm PACMAN_DIRECTION_X, 4
-.lcomm PACMAN_DIRECTION_Y, 4
+.equ CHAR_STRUCT_SIZE, 32
+
+
+
+.lcomm PACMAN, 32
 
   # ghosts
-.lcomm PINKY_X, 4
-.lcomm PINKY_Y, 4
-.lcomm PINKY_CORNER_TILE_X, 4
-.lcomm PINKY_CORNER_TILE_Y, 4
-
-.lcomm INKY_X, 4
-.lcomm INKY_Y, 4
-.lcomm INKY_CORNER_TILE_X, 4
-.lcomm INKY_CORNER_TILE_Y, 4
-
-.lcomm CLYDE_X, 4
-.lcomm CLYDE_Y, 4
-.lcomm CLYDE_CORNER_TILE_X, 4
-.lcomm CLYDE_CORNER_TILE_Y, 4
-
-.lcomm BLINKY_X, 4
-.lcomm BLINKY_Y, 4
-.lcomm BLINKY_CORNER_TILE_X, 4
-.lcomm BLINKY_CORNER_TILE_Y, 4
-
+.lcomm BLINKY, 32
+.lcomm PINKY, 32
+.lcomm INKY, 32
+.lcomm CLYDE, 32
 
 
 .section .text
@@ -463,28 +456,29 @@ main:
 
 
   # handle ijkl as pacman direction change
+  mov $PACMAN, %rsi  # pacman is the current char
 
   # only allow moves while on the middle of a tile
   # or if pacman if standing still (ie at the start)
 .handle_pacman_moves:
 
   # check if pacman is standing still
-  cmpl $0, PACMAN_DIRECTION_X
+  cmpl $0, CHAR_DIRECTION_X(%rsi)
   jne .is_pacman_centered
-  cmpl $0, PACMAN_DIRECTION_Y
+  cmpl $0, CHAR_DIRECTION_Y(%rsi)
   je .pacman_can_change_direction
 
   # check if pacman is centered
 .is_pacman_centered:
-  cmpl $TILE_RESOLUTION/2, PACMAN_X_RATIO
+  cmpl $TILE_RESOLUTION/2, CHAR_X_RATIO(%rsi)
   jne .handle_pacman_move_end # not horizontally centered
-  cmpl $TILE_RESOLUTION/2, PACMAN_Y_RATIO
+  cmpl $TILE_RESOLUTION/2, CHAR_Y_RATIO(%rsi)
   jne .handle_pacman_move_end # not vertically centered
 
 .pacman_can_change_direction:
   # store PACMAN_X & PACMAN_Y in r12 & r13 to easily check later if the next tile got no walls
-  movl PACMAN_X, %r12d
-  movl PACMAN_Y, %r13d
+  movl CHAR_X(%rsi), %r12d
+  movl CHAR_Y(%rsi), %r13d
 
   cmpb $1, UP_PRESSED
   je .go_up
@@ -505,8 +499,8 @@ main:
   cmpb $0, %r8b  # ie %r8b doesnt contain any wall flag
   jne .pacman_direction_safety_check
 
-  movl $0, PACMAN_DIRECTION_X
-  movl $-1, PACMAN_DIRECTION_Y
+  movl $0, CHAR_DIRECTION_X(%rsi)
+  movl $-1, CHAR_DIRECTION_Y(%rsi)
   jmp .pacman_direction_safety_check
 
 .go_left:
@@ -516,8 +510,8 @@ main:
   cmpb $0, %r8b  # ie %r8b doesnt contain any wall flag
   jne .pacman_direction_safety_check
 
-  movl $-1, PACMAN_DIRECTION_X
-  movl $0, PACMAN_DIRECTION_Y
+  movl $-1, CHAR_DIRECTION_X(%rsi)
+  movl $0, CHAR_DIRECTION_Y(%rsi)
   jmp .pacman_direction_safety_check
 
 .go_down:
@@ -527,8 +521,8 @@ main:
   cmpb $0, %r8b  # ie %r8b doesnt contain any wall flag
   jne .pacman_direction_safety_check
 
-  movl $0, PACMAN_DIRECTION_X
-  movl $1, PACMAN_DIRECTION_Y
+  movl $0, CHAR_DIRECTION_X(%rsi)
+  movl $1, CHAR_DIRECTION_Y(%rsi)
   jmp .pacman_direction_safety_check
 
 .go_right:
@@ -538,23 +532,23 @@ main:
   cmpb $0, %r8b  # ie %r8b doesnt contain any wall flag
   jne .pacman_direction_safety_check
 
-  movl $1, PACMAN_DIRECTION_X
-  movl $0, PACMAN_DIRECTION_Y
+  movl $1, CHAR_DIRECTION_X(%rsi)
+  movl $0, CHAR_DIRECTION_Y(%rsi)
 
 .pacman_direction_safety_check:
 
   # safety check: recheck if we really can go in the 'new' direction
   # allow to check if there was no direction change (both case of not pressing any keys and pressing the key not changing our direction) - if there is still a wall in front of us, stop pacman
-  movl PACMAN_X, %r12d
-  movl PACMAN_Y, %r13d
-  addl PACMAN_DIRECTION_X, %r12d
-  addl PACMAN_DIRECTION_Y, %r13d
+  movl CHAR_X(%rsi), %r12d
+  movl CHAR_Y(%rsi), %r13d
+  addl CHAR_DIRECTION_X(%rsi), %r12d
+  addl CHAR_DIRECTION_Y(%rsi), %r13d
   call .get_tile_type
   andb $(TILE_WALL | TILE_GHOST_WALL), %r8b
   cmpb $0, %r8b  # ie %r8b doesnt contain any wall flag
   je .handle_pacman_move_end
-  movl $0, PACMAN_DIRECTION_X
-  movl $0, PACMAN_DIRECTION_Y
+  movl $0, CHAR_DIRECTION_X(%rsi)
+  movl $0, CHAR_DIRECTION_Y(%rsi)
   jmp .handle_pacman_move_end
 
 .handle_pacman_move_end:
@@ -564,40 +558,40 @@ main:
 
   # move pacman
 
-  mov PACMAN_DIRECTION_X, %rax
-  addl %eax, PACMAN_X_RATIO
+  mov CHAR_DIRECTION_X(%rsi), %rax
+  addl %eax, CHAR_X_RATIO(%rsi)
 
   # if x_ratio >= resolution, then x++
-  cmpl $TILE_RESOLUTION, PACMAN_X_RATIO
+  cmpl $TILE_RESOLUTION, CHAR_X_RATIO(%rsi)
   jne .check_pacman_x_min
-  movl $0, PACMAN_X_RATIO
-  addl $1, PACMAN_X
+  movl $0, CHAR_X_RATIO(%rsi)
+  addl $1, CHAR_X(%rsi)
   jmp .move_pacman_y
 
 .check_pacman_x_min:
   # if x_ratio < 0, then x--
-  cmpl $-1, PACMAN_X_RATIO
+  cmpl $-1, CHAR_X_RATIO(%rsi)
   jne .move_pacman_y
-  movl $TILE_RESOLUTION-1, PACMAN_X_RATIO
-  subl $1, PACMAN_X
+  movl $TILE_RESOLUTION-1, CHAR_X_RATIO(%rsi)
+  subl $1, CHAR_X(%rsi)
 
 .move_pacman_y:
-  mov PACMAN_DIRECTION_Y, %rax
-  addl %eax, PACMAN_Y_RATIO
+  mov CHAR_DIRECTION_Y(%rsi), %rax
+  addl %eax, CHAR_Y_RATIO(%rsi)
 
   # if y_ratio >= resolution, then y++
-  cmpl $TILE_RESOLUTION, PACMAN_Y_RATIO
+  cmpl $TILE_RESOLUTION, CHAR_Y_RATIO(%rsi)
   jne .check_pacman_y_min
-  movl $0, PACMAN_Y_RATIO
-  addl $1, PACMAN_Y
+  movl $0, CHAR_Y_RATIO(%rsi)
+  addl $1, CHAR_Y(%rsi)
   jmp .move_pacman_end
 
 .check_pacman_y_min:
   # if y_ratio < 0, then y--
-  cmpl $-1, PACMAN_Y_RATIO
+  cmpl $-1, CHAR_Y_RATIO(%rsi)
   jne .move_pacman_end
-  movl $TILE_RESOLUTION-1, PACMAN_Y_RATIO
-  subl $1, PACMAN_Y
+  movl $TILE_RESOLUTION-1, CHAR_Y_RATIO(%rsi)
+  subl $1, CHAR_Y(%rsi)
 .move_pacman_end:
 
 
@@ -605,29 +599,29 @@ main:
   # if pacman position overflows, wrap indexes
 
   # check if y < 0
-  cmpl $0, PACMAN_Y
+  cmpl $0, CHAR_Y(%rsi)
   jge .pacman_overflow_check__y_sup_0
-  addl $BOARD_HEIGHT, PACMAN_Y  # y < 0 => y = height + y
+  addl $BOARD_HEIGHT, CHAR_Y(%rsi) # y < 0 => y = height + y
   jmp .pacman_overflow_check__y_inf_height
 
 .pacman_overflow_check__y_sup_0:
   # check if y >= height
-  cmpl $BOARD_HEIGHT, PACMAN_Y
+  cmpl $BOARD_HEIGHT, CHAR_Y(%rsi)
   jl .pacman_overflow_check__y_inf_height
-  subl $BOARD_HEIGHT, PACMAN_Y # y >= height => y = y - height
+  subl $BOARD_HEIGHT, CHAR_Y(%rsi) # y >= height => y = y - height
 .pacman_overflow_check__y_inf_height:
 
   # check if x < 0
-  cmpl $0, PACMAN_X
+  cmpl $0, CHAR_X(%rsi)
   jge .pacman_overflow_check__x_sup_0
-  addl $BOARD_WIDTH, PACMAN_X  # x < 0 => x = width + x
+  addl $BOARD_WIDTH, CHAR_X(%rsi) # x < 0 => x = width + x
   jmp .pacman_overflow_check__x_inf_height
 
 .pacman_overflow_check__x_sup_0:
   # check if x >= width
-  cmpl $BOARD_WIDTH, PACMAN_X
+  cmpl $BOARD_WIDTH, CHAR_X(%rsi)
   jl .pacman_overflow_check__x_inf_height
-  subl $BOARD_WIDTH, PACMAN_X # x >= width => x = x - width
+  subl $BOARD_WIDTH, CHAR_X(%rsi) # x >= width => x = x - width
 .pacman_overflow_check__x_inf_height:
 
 
@@ -638,8 +632,8 @@ main:
 
   # check pacman position for stuff (dots, energizers & ghosts)
 
-  movl PACMAN_X, %r12d
-  movl PACMAN_Y, %r13d
+  movl CHAR_X(%rsi), %r12d
+  movl CHAR_Y(%rsi), %r13d
   call .get_tile_type
 
   # dot
@@ -790,11 +784,12 @@ main:
   jmp .read_board__set_tile
 
 .read_board__pacman:
+  mov $PACMAN, %rsi  # set current char to pacman
   # set pacman pos
-  movl %r12d, PACMAN_X
-  movl %r13d, PACMAN_Y
-  movl $0, PACMAN_X_RATIO
-  movl $TILE_RESOLUTION/2, PACMAN_Y_RATIO
+  movl %r12d, CHAR_X(%rsi)
+  movl %r13d, CHAR_Y(%rsi)
+  movl $0, CHAR_X_RATIO(%rsi)
+  movl $TILE_RESOLUTION/2, CHAR_Y_RATIO(%rsi)
   # pacman tile defaults to empty
   mov $0, %r8
   jmp .read_board__set_tile
@@ -981,22 +976,24 @@ main:
 
   # draw pacman
 
+  mov $PACMAN, %rsi  # set current char to pacman
+
   mov $-PACMAN_SIZE/2+1, %r14
   mov $-PACMAN_SIZE/2+1, %r15
   mov $0xff0000, %r9
 .pacman_draw_loop:
-  imul $TILE_SIZE, PACMAN_X, %r10d
+  imul $TILE_SIZE, CHAR_X(%rsi), %r10d
   mov $0, %rdx
   mov $0, %rax
-  imul $TILE_SIZE, PACMAN_X_RATIO, %eax
+  imull $TILE_SIZE, CHAR_X_RATIO(%rsi), %eax
   mov $TILE_RESOLUTION, %rcx
   idiv %rcx
   add %eax, %r10d
 
-  imul $TILE_SIZE, PACMAN_Y, %r11d
+  imul $TILE_SIZE, CHAR_Y(%rsi), %r11d
   mov $0, %rdx
   mov $0, %rax
-  imul $TILE_SIZE, PACMAN_Y_RATIO, %eax
+  imul $TILE_SIZE, CHAR_Y_RATIO(%rsi), %eax
   mov $TILE_RESOLUTION, %rcx
   idiv %rcx
   add %eax, %r11d
