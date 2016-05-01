@@ -148,6 +148,27 @@ fd_set:
 .equ TILE_NOHUP, 0x20 # _
 
 
+# DIRECTIONS
+
+.equ DIRECTION_X, 0
+.equ DIRECTION_Y, 4
+
+.equ DIRECTION_STRUCT_SIZE, 8
+
+.equ DIRECTION_NONE, 0
+.equ DIRECTION_UP, 8
+.equ DIRECTION_LEFT, 16
+.equ DIRECTION_DOWN, 24
+.equ DIRECTION_RIGHT, 32
+
+DIRECTIONS:
+  .long 0 , 0   # none
+  .long 0 , -1  # up
+  .long -1, 0   # left
+  .long 0 , 1   # down
+  .long 1 , 0   # right
+
+
 # STATE
 # positions are in tiles + ratio/TILE_RESOLUTION
 
@@ -158,22 +179,26 @@ fd_set:
 .equ CHAR_X_RATIO, 4
 .equ CHAR_Y, 8
 .equ CHAR_Y_RATIO, 12
-.equ CHAR_DIRECTION_X, 16
-.equ CHAR_DIRECTION_Y, 20
-.equ CHAR_CORNER_TILE_X, 24
-.equ CHAR_CORNER_TILE_Y, 28
+.equ CHAR_DIRECTION, 16
+.equ CHAR_CORNER_TILE_X, 20
+.equ CHAR_CORNER_TILE_Y, 24
 
-.equ CHAR_STRUCT_SIZE, 32
-
+.equ CHAR_STRUCT_SIZE, 28
 
 
-.lcomm PACMAN, 32
+
+.lcomm PACMAN, CHAR_STRUCT_SIZE
 
   # ghosts
-.lcomm BLINKY, 32
-.lcomm PINKY, 32
-.lcomm INKY, 32
-.lcomm CLYDE, 32
+.lcomm BLINKY, CHAR_STRUCT_SIZE
+.lcomm PINKY, CHAR_STRUCT_SIZE
+.lcomm INKY, CHAR_STRUCT_SIZE
+.lcomm CLYDE, CHAR_STRUCT_SIZE
+
+CHARACTERS:
+  .quad PACMAN, BLINKY, PINKY, INKY, CLYDE, 0
+GHOSTS:
+  .quad BLINKY, PINKY, INKY, CLYDE, 0
 
 
 .section .text
@@ -350,8 +375,7 @@ main:
 
   # blinky starts going left
   mov $BLINKY, %rsi
-  movl $-1, CHAR_DIRECTION_X(%rsi)
-  movl $0, CHAR_DIRECTION_Y(%rsi)
+  movl $DIRECTION_LEFT, CHAR_DIRECTION(%rsi)
 
 
 
@@ -476,9 +500,7 @@ main:
 .handle_pacman_moves:
 
   # check if pacman is standing still
-  cmpl $0, CHAR_DIRECTION_X(%rsi)
-  jne .is_pacman_centered
-  cmpl $0, CHAR_DIRECTION_Y(%rsi)
+  cmpl $DIRECTION_NONE, CHAR_DIRECTION(%rsi)
   je .pacman_can_change_direction
 
   # check if pacman is centered
@@ -512,8 +534,7 @@ main:
   cmpb $0, %r8b  # ie %r8b doesnt contain any wall flag
   jne .pacman_direction_safety_check
 
-  movl $0, CHAR_DIRECTION_X(%rsi)
-  movl $-1, CHAR_DIRECTION_Y(%rsi)
+  movl $DIRECTION_UP, CHAR_DIRECTION(%rsi)
   jmp .pacman_direction_safety_check
 
 .go_left:
@@ -523,8 +544,7 @@ main:
   cmpb $0, %r8b  # ie %r8b doesnt contain any wall flag
   jne .pacman_direction_safety_check
 
-  movl $-1, CHAR_DIRECTION_X(%rsi)
-  movl $0, CHAR_DIRECTION_Y(%rsi)
+  movl $DIRECTION_LEFT, CHAR_DIRECTION(%rsi)
   jmp .pacman_direction_safety_check
 
 .go_down:
@@ -534,8 +554,7 @@ main:
   cmpb $0, %r8b  # ie %r8b doesnt contain any wall flag
   jne .pacman_direction_safety_check
 
-  movl $0, CHAR_DIRECTION_X(%rsi)
-  movl $1, CHAR_DIRECTION_Y(%rsi)
+  movl $DIRECTION_DOWN, CHAR_DIRECTION(%rsi)
   jmp .pacman_direction_safety_check
 
 .go_right:
@@ -545,8 +564,7 @@ main:
   cmpb $0, %r8b  # ie %r8b doesnt contain any wall flag
   jne .pacman_direction_safety_check
 
-  movl $1, CHAR_DIRECTION_X(%rsi)
-  movl $0, CHAR_DIRECTION_Y(%rsi)
+  movl $DIRECTION_RIGHT, CHAR_DIRECTION(%rsi)
 
 .pacman_direction_safety_check:
 
@@ -554,14 +572,14 @@ main:
   # allow to check if there was no direction change (both case of not pressing any keys and pressing the key not changing our direction) - if there is still a wall in front of us, stop pacman
   movl CHAR_X(%rsi), %r12d
   movl CHAR_Y(%rsi), %r13d
-  addl CHAR_DIRECTION_X(%rsi), %r12d
-  addl CHAR_DIRECTION_Y(%rsi), %r13d
+  movl CHAR_DIRECTION(%rsi), %eax
+  addl (DIRECTIONS+DIRECTION_X)(%eax), %r12d
+  addl (DIRECTIONS+DIRECTION_Y)(%eax), %r13d
   call .get_tile_type
   andb $(TILE_WALL | TILE_GHOST_WALL), %r8b
   cmpb $0, %r8b  # ie %r8b doesnt contain any wall flag
   je .handle_pacman_move_end
-  movl $0, CHAR_DIRECTION_X(%rsi)
-  movl $0, CHAR_DIRECTION_Y(%rsi)
+  movb $DIRECTION_NONE, CHAR_DIRECTION(%rsi)
   jmp .handle_pacman_move_end
 
 .handle_pacman_move_end:
@@ -570,19 +588,21 @@ main:
 
   # move pacman & the ghosts according to their direction
 
-  mov $PACMAN, %rsi
+  mov $0, %rdi  # array offset
 .move_char_loop:
-  call .move_char
-  cmp $CLYDE, %rsi  # clyde is the last char - break out of the loop
+  mov CHARACTERS(%rdi), %rsi
+  cmp $0, %rsi  # the array is 0 terminated
   je .update_pacman_status
-  add $CHAR_STRUCT_SIZE, %rsi
+  call .move_char
+  add $8, %rdi
   jmp .move_char_loop
 
 
 
 
 .move_char:  # moves a character (in %rsi) according to its direction. handles board wrap & ratio update
-  mov CHAR_DIRECTION_X(%rsi), %rax
+  movl CHAR_DIRECTION(%rsi), %eax
+  movl (DIRECTIONS+DIRECTION_X)(%eax), %eax
   addl %eax, CHAR_X_RATIO(%rsi)
 
   # if x_ratio >= resolution, then x++
@@ -600,7 +620,8 @@ main:
   subl $1, CHAR_X(%rsi)
 
 .move_char_y:
-  mov CHAR_DIRECTION_Y(%rsi), %rax
+  movl CHAR_DIRECTION(%rsi), %eax
+  movl (DIRECTIONS+DIRECTION_Y)(%eax), %eax
   addl %eax, CHAR_Y_RATIO(%rsi)
 
   # if y_ratio >= resolution, then y++
