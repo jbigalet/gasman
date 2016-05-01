@@ -134,7 +134,7 @@ fd_set:
 
 .lcomm BOARD, BOARD_WIDTH*BOARD_HEIGHT
 
-.equ PACMAN_SIZE, 12
+.equ CHAR_SIZE, 12
 
 
 # TILE TYPES - as flags
@@ -741,11 +741,29 @@ main:
   cmpb $94, buffer # ^ == ghost wall
   je .read_board__ghost_wall
 
-  /* cmpb $46, buffer # . == dot */
-  /* je .read_board__dot */
+  cmpb $66, buffer # B == blinky's start
+  je .read_board__blinky
 
-  /* cmpb $46, buffer # . == dot */
-  /* je .read_board__dot */
+  cmpb $98, buffer # b == blinky's corner
+  je .read_board__blinky_corner
+
+  cmpb $73, buffer # I == inky's start
+  je .read_board__inky
+
+  cmpb $105, buffer # i == inky's corner
+  je .read_board__inky_corner
+
+  cmpb $80, buffer # P == pinky's start
+  je .read_board__pinky
+
+  cmpb $112, buffer # p == pinky's corner
+  je .read_board__pinky_corner
+
+  cmpb $67, buffer # C == clyde's start
+  je .read_board__clyde
+
+  cmpb $99, buffer # c == clyde's corner
+  je .read_board__clyde_corner
 
   jmp .read_board__empty # == unknown
 
@@ -785,12 +803,58 @@ main:
 
 .read_board__pacman:
   mov $PACMAN, %rsi  # set current char to pacman
-  # set pacman pos
+  jmp .read_board__character_spawn
+
+.read_board__blinky:
+  mov $BLINKY, %rsi
+  jmp .read_board__character_spawn
+
+.read_board__inky:
+  mov $INKY, %rsi
+  jmp .read_board__character_spawn
+
+.read_board__pinky:
+  mov $PINKY, %rsi
+  jmp .read_board__character_spawn
+
+.read_board__clyde:
+  mov $CLYDE, %rsi
+  jmp .read_board__character_spawn
+
+.read_board__blinky_corner:
+  mov $BLINKY, %rsi
+  jmp .read_board__character_corner
+
+.read_board__inky_corner:
+  mov $INKY, %rsi
+  jmp .read_board__character_corner
+
+.read_board__pinky_corner:
+  mov $PINKY, %rsi
+  jmp .read_board__character_corner
+
+.read_board__clyde_corner:
+  mov $CLYDE, %rsi
+  jmp .read_board__character_corner
+
+
+.read_board__character_spawn:
+  # uses %rsi as the current character
+  # set pos
   movl %r12d, CHAR_X(%rsi)
   movl %r13d, CHAR_Y(%rsi)
   movl $0, CHAR_X_RATIO(%rsi)
   movl $TILE_RESOLUTION/2, CHAR_Y_RATIO(%rsi)
-  # pacman tile defaults to empty
+  # character tile defaults to empty
+  mov $0, %r8
+  jmp .read_board__set_tile
+
+.read_board__character_corner:
+  # uses %rsi as the current character
+  # set pos
+  movl %r12d, CHAR_CORNER_TILE_X(%rsi)
+  movl %r13d, CHAR_CORNER_TILE_Y(%rsi)
+  # corner tile defaults to empty
   mov $0, %r8
   jmp .read_board__set_tile
 
@@ -936,12 +1000,12 @@ main:
   jmp .draw_board__afterdraw
 
 .draw_board__ghost_wall:
-  mov $0x000044, %r9
+  mov $0x0000aa, %r9
   call .draw_unicolor_tile
   jmp .draw_board__afterdraw
 
 .draw_board__dot:
-  mov $0xbbbbbb, %r9
+  mov $0x444444, %r9
   call .draw_unicolor_tile
   jmp .draw_board__afterdraw
 
@@ -951,7 +1015,7 @@ main:
   jmp .draw_board__afterdraw
 
 .draw_board__empty:
-  mov $0xffffff, %r9
+  mov $0x000000, %r9
   call .draw_unicolor_tile
   jmp .draw_board__afterdraw
 
@@ -968,20 +1032,40 @@ main:
   cmp $BOARD_HEIGHT, %r13
   jne .draw_board__inc_x
 
+
+
   # all static stuff has been drawn
   # now, draw pacman & the ghosts
-  # TODO ghosts
-
-
-
-  # draw pacman
+  # then draw the debug grid on top
 
   mov $PACMAN, %rsi  # set current char to pacman
+  mov $0xffff00, %r9  # pacman is yellow
+  call .draw_char
 
-  mov $-PACMAN_SIZE/2+1, %r14
-  mov $-PACMAN_SIZE/2+1, %r15
+  mov $BLINKY, %rsi
   mov $0xff0000, %r9
-.pacman_draw_loop:
+  call .draw_char
+
+  mov $INKY, %rsi
+  mov $0x00ffff, %r9
+  call .draw_char
+
+  mov $PINKY, %rsi
+  mov $0xff00ff, %r9
+  call .draw_char
+
+  mov $CLYDE, %rsi
+  mov $0xff8000, %r9
+  call .draw_char
+
+  jmp .draw_debug_grid
+
+
+
+.draw_char:  # will draw the char pointed by %rsi, wiht %r9 as the color
+  mov $-CHAR_SIZE/2+1, %r14
+  mov $-CHAR_SIZE/2+1, %r15
+.char_draw_loop:
   imul $TILE_SIZE, CHAR_X(%rsi), %r10d
   mov $0, %rdx
   mov $0, %rax
@@ -1003,14 +1087,17 @@ main:
 
   call .draw_pixel_with_overflow_checks
   add $1, %r14
-  cmp $PACMAN_SIZE/2, %r14
-  jne .pacman_draw_loop
-  mov $-PACMAN_SIZE/2+1, %r14
+  cmp $CHAR_SIZE/2, %r14
+  jne .char_draw_loop
+  mov $-CHAR_SIZE/2+1, %r14
   add $1, %r15
-  cmp $PACMAN_SIZE/2, %r15
-  jne .pacman_draw_loop
+  cmp $CHAR_SIZE/2, %r15
+  jne .char_draw_loop
+  ret
 
 
+
+.draw_debug_grid:
   # draw debug grid
   cmp $0, debug_grid_on
   je .draw_debug_end
