@@ -338,11 +338,21 @@ main:
 
 
 
+
+# setup initial state
+
+  # read the board
+  call .read_board_from_file
+
   # standard sleep is 1/60 s
   movb $0, sleep_timeval
   movl $FRAME_TIMEOUT, sleep_timeval_nano
 
-  call .read_board_from_file
+  # blinky starts going left
+  mov $BLINKY, %rsi
+  movl $-1, CHAR_DIRECTION_X(%rsi)
+  movl $0, CHAR_DIRECTION_Y(%rsi)
+
 
 
 
@@ -455,6 +465,9 @@ main:
 .readkey_end:
 
 
+
+
+
   # handle ijkl as pacman direction change
   mov $PACMAN, %rsi  # pacman is the current char
 
@@ -555,74 +568,86 @@ main:
 
 
 
+  # move pacman & the ghosts according to their direction
 
-  # move pacman
+  mov $PACMAN, %rsi
+.move_char_loop:
+  call .move_char
+  cmp $CLYDE, %rsi  # clyde is the last char - break out of the loop
+  je .update_pacman_status
+  add $CHAR_STRUCT_SIZE, %rsi
+  jmp .move_char_loop
 
+
+
+
+.move_char:  # moves a character (in %rsi) according to its direction. handles board wrap & ratio update
   mov CHAR_DIRECTION_X(%rsi), %rax
   addl %eax, CHAR_X_RATIO(%rsi)
 
   # if x_ratio >= resolution, then x++
   cmpl $TILE_RESOLUTION, CHAR_X_RATIO(%rsi)
-  jne .check_pacman_x_min
+  jne .check_char_x_min
   movl $0, CHAR_X_RATIO(%rsi)
   addl $1, CHAR_X(%rsi)
-  jmp .move_pacman_y
+  jmp .move_char_y
 
-.check_pacman_x_min:
+.check_char_x_min:
   # if x_ratio < 0, then x--
   cmpl $-1, CHAR_X_RATIO(%rsi)
-  jne .move_pacman_y
+  jne .move_char_y
   movl $TILE_RESOLUTION-1, CHAR_X_RATIO(%rsi)
   subl $1, CHAR_X(%rsi)
 
-.move_pacman_y:
+.move_char_y:
   mov CHAR_DIRECTION_Y(%rsi), %rax
   addl %eax, CHAR_Y_RATIO(%rsi)
 
   # if y_ratio >= resolution, then y++
   cmpl $TILE_RESOLUTION, CHAR_Y_RATIO(%rsi)
-  jne .check_pacman_y_min
+  jne .check_char_y_min
   movl $0, CHAR_Y_RATIO(%rsi)
   addl $1, CHAR_Y(%rsi)
-  jmp .move_pacman_end
+  jmp .move_char_end
 
-.check_pacman_y_min:
+.check_char_y_min:
   # if y_ratio < 0, then y--
   cmpl $-1, CHAR_Y_RATIO(%rsi)
-  jne .move_pacman_end
+  jne .move_char_end
   movl $TILE_RESOLUTION-1, CHAR_Y_RATIO(%rsi)
   subl $1, CHAR_Y(%rsi)
-.move_pacman_end:
+.move_char_end:
 
 
-
-  # if pacman position overflows, wrap indexes
+  # if the char position overflows, wrap indexes
 
   # check if y < 0
   cmpl $0, CHAR_Y(%rsi)
-  jge .pacman_overflow_check__y_sup_0
+  jge .char_overflow_check__y_sup_0
   addl $BOARD_HEIGHT, CHAR_Y(%rsi) # y < 0 => y = height + y
-  jmp .pacman_overflow_check__y_inf_height
+  jmp .char_overflow_check__y_inf_height
 
-.pacman_overflow_check__y_sup_0:
+.char_overflow_check__y_sup_0:
   # check if y >= height
   cmpl $BOARD_HEIGHT, CHAR_Y(%rsi)
-  jl .pacman_overflow_check__y_inf_height
+  jl .char_overflow_check__y_inf_height
   subl $BOARD_HEIGHT, CHAR_Y(%rsi) # y >= height => y = y - height
-.pacman_overflow_check__y_inf_height:
+.char_overflow_check__y_inf_height:
 
   # check if x < 0
   cmpl $0, CHAR_X(%rsi)
-  jge .pacman_overflow_check__x_sup_0
+  jge .char_overflow_check__x_sup_0
   addl $BOARD_WIDTH, CHAR_X(%rsi) # x < 0 => x = width + x
-  jmp .pacman_overflow_check__x_inf_height
+  jmp .char_overflow_check__x_inf_height
 
-.pacman_overflow_check__x_sup_0:
+.char_overflow_check__x_sup_0:
   # check if x >= width
   cmpl $BOARD_WIDTH, CHAR_X(%rsi)
-  jl .pacman_overflow_check__x_inf_height
+  jl .char_overflow_check__x_inf_height
   subl $BOARD_WIDTH, CHAR_X(%rsi) # x >= width => x = x - width
-.pacman_overflow_check__x_inf_height:
+.char_overflow_check__x_inf_height:
+
+  ret
 
 
 
@@ -630,7 +655,9 @@ main:
 
 
 
+.update_pacman_status:
   # check pacman position for stuff (dots, energizers & ghosts)
+  mov $PACMAN, %rsi
 
   movl CHAR_X(%rsi), %r12d
   movl CHAR_Y(%rsi), %r13d
