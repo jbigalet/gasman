@@ -151,35 +151,29 @@ fd_set:
 # STATE
 # positions are in tiles + ratio/TILE_RESOLUTION
 
-  # pacman
-.lcomm PACMAN_X, 4
-.lcomm PACMAN_X_RATIO, 4
-.lcomm PACMAN_Y, 4
-.lcomm PACMAN_Y_RATIO, 4
+  # pacman & ghosts got the same struct discribed below,
+  # excepts that pacman doesnt have a home corner tile
+  # note: everything is 4 byte
+.equ CHAR_X, 0
+.equ CHAR_X_RATIO, 4
+.equ CHAR_Y, 8
+.equ CHAR_Y_RATIO, 12
+.equ CHAR_DIRECTION_X, 16
+.equ CHAR_DIRECTION_Y, 20
+.equ CHAR_CORNER_TILE_X, 24
+.equ CHAR_CORNER_TILE_Y, 28
 
-.lcomm PACMAN_DIRECTION_X, 4
-.lcomm PACMAN_DIRECTION_Y, 4
+.equ CHAR_STRUCT_SIZE, 32
+
+
+
+.lcomm PACMAN, 32
 
   # ghosts
-.lcomm PINKY_X, 4
-.lcomm PINKY_Y, 4
-.lcomm PINKY_CORNER_TILE_X, 4
-.lcomm PINKY_CORNER_TILE_Y, 4
-
-.lcomm INKY_X, 4
-.lcomm INKY_Y, 4
-.lcomm INKY_CORNER_TILE_X, 4
-.lcomm INKY_CORNER_TILE_Y, 4
-
-.lcomm CLYDE_X, 4
-.lcomm CLYDE_Y, 4
-.lcomm CLYDE_CORNER_TILE_X, 4
-.lcomm CLYDE_CORNER_TILE_Y, 4
-
-.lcomm BLINKY_X, 4
-.lcomm BLINKY_Y, 4
-.lcomm BLINKY_CORNER_TILE_X, 4
-.lcomm BLINKY_CORNER_TILE_Y, 4
+.lcomm PINKY, 32
+.lcomm INKY, 32
+.lcomm BLINKY, 32
+.lcomm CLYDE, 32
 
 
 
@@ -476,7 +470,7 @@ main:
 
   # check if pacman is centered
 .is_pacman_centered:
-  cmpl $TILE_RESOLUTION/2, PACMAN_X_RATIO
+  cmpl $TILE_RESOLUTION/2, PACMAN($CHAR_X_RATIO)
   jne .handle_pacman_move_end # not horizontally centered
   cmpl $TILE_RESOLUTION/2, PACMAN_Y_RATIO
   jne .handle_pacman_move_end # not vertically centered
