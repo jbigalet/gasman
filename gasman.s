@@ -118,6 +118,10 @@ oldkbmode:
 fd_set:
   .fill 128, 1, 0
 
+.equ RANDOM_SEED_MULTIPLIER, 1103515245
+.equ RANDOM_SEED_INCREMENT, 12345
+.lcomm LAST_RANDOM_NUMBER, 4
+
 
 
 # BOARD
@@ -152,21 +156,25 @@ fd_set:
 
 .equ DIRECTION_X, 0
 .equ DIRECTION_Y, 4
+.equ DIRECTION_OPPOSITE, 8
 
-.equ DIRECTION_STRUCT_SIZE, 8
+.equ DIRECTION_STRUCT_SIZE, 12
 
 .equ DIRECTION_NONE, 0
-.equ DIRECTION_UP, 8
-.equ DIRECTION_LEFT, 16
-.equ DIRECTION_DOWN, 24
-.equ DIRECTION_RIGHT, 32
+.equ DIRECTION_UP, DIRECTION_STRUCT_SIZE*1
+.equ DIRECTION_LEFT, DIRECTION_STRUCT_SIZE*2
+.equ DIRECTION_DOWN, DIRECTION_STRUCT_SIZE*3
+.equ DIRECTION_RIGHT, DIRECTION_STRUCT_SIZE*4
 
-DIRECTIONS:
-  .long 0 , 0   # none
-  .long 0 , -1  # up
-  .long -1, 0   # left
-  .long 0 , 1   # down
-  .long 1 , 0   # right
+.equ FIRST_DIRECTION, DIRECTION_UP
+.equ LAST_DIRECTION, DIRECTION_RIGHT
+
+DIRECTION_VALUES:  # x, y, opposite direction
+  .long 0 , 0 , DIRECTION_NONE  # none
+  .long 0 , -1, DIRECTION_DOWN  # up
+  .long -1, 0 , DIRECTION_RIGHT  # left
+  .long 0 , 1 , DIRECTION_UP  # down
+  .long 1 , 0 , DIRECTION_LEFT  # right
 
 
 # STATE
@@ -199,6 +207,14 @@ CHARACTERS:
   .quad PACMAN, BLINKY, PINKY, INKY, CLYDE, 0
 GHOSTS:
   .quad BLINKY, PINKY, INKY, CLYDE, 0
+
+
+
+
+
+
+
+
 
 
 .section .text
@@ -360,6 +376,12 @@ main:
   mov $KDSKBMODE, %rsi # cmd
   mov $K_MEDIUMRAW, %rdx # new mode
   syscall
+
+
+
+  # initial random seed
+  rdtsc
+  movl %eax, LAST_RANDOM_NUMBER
 
 
 
@@ -573,8 +595,8 @@ main:
   movl CHAR_X(%rsi), %r12d
   movl CHAR_Y(%rsi), %r13d
   movl CHAR_DIRECTION(%rsi), %eax
-  addl (DIRECTIONS+DIRECTION_X)(%eax), %r12d
-  addl (DIRECTIONS+DIRECTION_Y)(%eax), %r13d
+  addl (DIRECTION_VALUES+DIRECTION_X)(%eax), %r12d
+  addl (DIRECTION_VALUES+DIRECTION_Y)(%eax), %r13d
   call .get_tile_type
   andb $(TILE_WALL | TILE_GHOST_WALL), %r8b
   cmpb $0, %r8b  # ie %r8b doesnt contain any wall flag
@@ -583,6 +605,58 @@ main:
   jmp .handle_pacman_move_end
 
 .handle_pacman_move_end:
+
+
+
+
+
+  # handle ghost direction change if they're centered on a tile
+  mov $BLINKY, %rsi
+.is_ghost_centered:
+  cmpl $TILE_RESOLUTION/2, CHAR_X_RATIO(%rsi)
+  jne .ghost_direction_change_end  # not horizontally centered
+  cmpl $TILE_RESOLUTION/2, CHAR_Y_RATIO(%rsi)
+  jne .ghost_direction_change_end  # not vertically centered
+
+  # the ghost is centered: choose the next direction to take
+  movl CHAR_DIRECTION(%rsi), %r9d  # current ghost direction - to check for the opposite one
+  movl $FIRST_DIRECTION, %eax  # current direction beeing looked at
+  movl $0xffffffff, %r10d  # current minimum distance
+  movl %r9d, %r11d  # current minimum distance direction
+.choose_ghost_direction_loop:
+  cmpl %r9d, (DIRECTION_VALUES+DIRECTION_OPPOSITE)(%eax)
+  je .choose_ghost_direction_next  # ghost can't go backwards
+
+  movl CHAR_X(%rsi), %r12d  # current ghost position x
+  movl CHAR_Y(%rsi), %r13d  # current ghost position y
+  addl (DIRECTION_VALUES+DIRECTION_X)(%eax), %r12d
+  addl (DIRECTION_VALUES+DIRECTION_Y)(%eax), %r13d
+  call .get_tile_type
+  andb $(TILE_WALL | TILE_GHOST_WALL), %r8b
+  cmpb $0, %r8b  # ie %r8b doesnt contain any wall flag
+  jne .choose_ghost_direction_next  # this direction is not possible
+
+  call .new_random_number
+  movl LAST_RANDOM_NUMBER, %r15d  # distance to the target tile
+
+  cmpl %r15d, %r10d
+  jb .choose_ghost_direction_next
+  mov %r15d, %r10d
+  mov %eax, %r11d
+
+.choose_ghost_direction_next:
+
+  cmp $LAST_DIRECTION, %eax
+  je .choose_ghost_direction_end
+  add $DIRECTION_STRUCT_SIZE, %eax
+  jmp .choose_ghost_direction_loop
+
+.choose_ghost_direction_end:
+  movl %r11d, CHAR_DIRECTION(%rsi)
+
+.ghost_direction_change_end:
+
+
 
 
 
@@ -602,7 +676,7 @@ main:
 
 .move_char:  # moves a character (in %rsi) according to its direction. handles board wrap & ratio update
   movl CHAR_DIRECTION(%rsi), %eax
-  movl (DIRECTIONS+DIRECTION_X)(%eax), %eax
+  movl (DIRECTION_VALUES+DIRECTION_X)(%eax), %eax
   addl %eax, CHAR_X_RATIO(%rsi)
 
   # if x_ratio >= resolution, then x++
@@ -621,7 +695,7 @@ main:
 
 .move_char_y:
   movl CHAR_DIRECTION(%rsi), %eax
-  movl (DIRECTIONS+DIRECTION_Y)(%eax), %eax
+  movl (DIRECTION_VALUES+DIRECTION_Y)(%eax), %eax
   addl %eax, CHAR_Y_RATIO(%rsi)
 
   # if y_ratio >= resolution, then y++
@@ -935,6 +1009,7 @@ main:
   # backup indexes as we'll modify them if they overflow
   push %r12
   push %r13
+  push %r14
 
   # check if y < 0
   cmpl $0, %r13d
@@ -968,6 +1043,7 @@ main:
   movb BOARD(%r14), %r8b
 
   # restore indexes
+  pop %r14
   pop %r13
   pop %r12
 
@@ -1272,6 +1348,20 @@ main:
   cmp $TILE_SIZE, %r15
   jne .draw_unicolor_tile__x
   ret
+
+
+
+.new_random_number:  # LCG
+  push %rax
+  movl LAST_RANDOM_NUMBER, %eax
+  imull $RANDOM_SEED_MULTIPLIER, %eax
+  addl $RANDOM_SEED_INCREMENT, %eax
+  movl %eax, LAST_RANDOM_NUMBER
+  pop %rax
+  ret
+
+
+
 
 
 .signal_handler: # print stuff, cleanup & exit
