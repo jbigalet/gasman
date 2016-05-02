@@ -90,7 +90,8 @@ sigaction_handler:  # __rt_sigaction
 
 # MISC
 
-.equ FRAME_TIMEOUT, 16666666
+.equ FRAME_TIMEOUT, 16666666   # in nanosec
+.equ ROUND_PAUSE, 1   # in sec
 
 .lcomm fb_handle, 8
 .lcomm screensize, 8
@@ -190,8 +191,12 @@ DIRECTION_VALUES:  # x, y, opposite direction
 .equ CHAR_DIRECTION, 16
 .equ CHAR_CORNER_TILE_X, 20
 .equ CHAR_CORNER_TILE_Y, 24
+.equ CHAR_START_X, 28
+.equ CHAR_START_X_RATIO, 32
+.equ CHAR_START_Y, 36
+.equ CHAR_START_Y_RATIO, 40
 
-.equ CHAR_STRUCT_SIZE, 28
+.equ CHAR_STRUCT_SIZE, 44
 
 
 
@@ -207,6 +212,9 @@ CHARACTERS:
   .quad PACMAN, BLINKY, PINKY, INKY, CLYDE, 0
 GHOSTS:
   .quad BLINKY, PINKY, INKY, CLYDE, 0
+
+.equ START_PACMAN_LIFES, 3
+.lcomm PACMAN_LIFES, 4
 
 
 
@@ -391,16 +399,74 @@ main:
   # read the board
   call .read_board_from_file
 
-  # standard sleep is 1/60 s
-  movb $0, sleep_timeval
-  movl $FRAME_TIMEOUT, sleep_timeval_nano
+  # pacman starts with 3 lifes
+  movl $START_PACMAN_LIFES, PACMAN_LIFES
+
+
+# game init
+.spawn:
+
+  # set everyone's position
+  mov $0, %rdi  # array offset
+.spawn__set_position:
+  mov CHARACTERS(%rdi), %rsi
+  cmp $0, %rsi  # the array is 0 terminated
+  je .spawn__set_position_end
+
+  movl CHAR_START_X(%rsi), %eax
+  movl %eax, CHAR_X(%rsi)
+  movl CHAR_START_Y(%rsi), %eax
+  movl %eax, CHAR_Y(%rsi)
+  movl CHAR_START_X_RATIO(%rsi), %eax
+  movl %eax, CHAR_X_RATIO(%rsi)
+  movl CHAR_START_Y_RATIO(%rsi), %eax
+  movl %eax, CHAR_Y_RATIO(%rsi)
+
+  movl $DIRECTION_NONE, CHAR_DIRECTION(%rsi)
+
+  add $8, %rdi
+  jmp .spawn__set_position
+.spawn__set_position_end:
+
 
   # blinky starts going left
   mov $BLINKY, %rsi
   movl $DIRECTION_LEFT, CHAR_DIRECTION(%rsi)
 
 
+  # draw the board & then sleep for 3 seconds before starting a new round
+  call .draw_board
 
+  movb $ROUND_PAUSE, sleep_timeval
+  movl $0, sleep_timeval_nano
+
+  mov $SYS_NANOSLEEP, %rax
+  mov $sleep_timeval, %rdi
+  mov $0, %rsi
+  syscall
+
+  # standard sleep is 1/60 s (used to keep 60 fps going)
+  movb $0, sleep_timeval
+  movl $FRAME_TIMEOUT, sleep_timeval_nano
+
+  jmp .main_loop
+
+
+
+
+
+.death:
+  subl $1, PACMAN_LIFES
+  cmp $0, PACMAN_LIFES
+  je .game_over
+  jmp .spawn
+
+
+
+
+
+.game_over:
+  jmp .cleanup_and_exit
 
 
 
@@ -787,6 +853,30 @@ main:
 
 
 
+  # ghosts
+  mov $0, %rdi  # array offset
+.check_ghost_collision:
+  mov GHOSTS(%rdi), %rsi
+  cmp $0, %rsi  # the array is 0 terminated
+  je .check_ghost_collision_end
+
+  cmpl %r12d, CHAR_X(%rsi)
+  jne .check_ghost_collision_next
+  cmpl %r13d, CHAR_Y(%rsi)
+  jne .check_ghost_collision_next
+
+  # there was a collision: die
+  jmp .death
+
+.check_ghost_collision_next:
+  add $8, %rdi
+  jmp .check_ghost_collision
+.check_ghost_collision_end:
+
+
+
+
+
 
   call .draw_board
 
@@ -963,10 +1053,10 @@ main:
 .read_board__character_spawn:
   # uses %rsi as the current character
   # set pos
-  movl %r12d, CHAR_X(%rsi)
-  movl %r13d, CHAR_Y(%rsi)
-  movl $0, CHAR_X_RATIO(%rsi)
-  movl $TILE_RESOLUTION/2, CHAR_Y_RATIO(%rsi)
+  movl %r12d, CHAR_START_X(%rsi)
+  movl %r13d, CHAR_START_Y(%rsi)
+  movl $0, CHAR_START_X_RATIO(%rsi)
+  movl $TILE_RESOLUTION/2, CHAR_START_Y_RATIO(%rsi)
   # character tile defaults to empty
   mov $0, %r8
   jmp .read_board__set_tile
