@@ -195,8 +195,10 @@ DIRECTION_VALUES:  # x, y, opposite direction
 .equ CHAR_START_X_RATIO, 32
 .equ CHAR_START_Y, 36
 .equ CHAR_START_Y_RATIO, 40
+.equ CHAR_CURRENT_MODE, 44
+.equ CHAR_CURRENT_MODE_TIMEOUT, 48
 
-.equ CHAR_STRUCT_SIZE, 44
+.equ CHAR_STRUCT_SIZE, 52
 
 
 
@@ -218,6 +220,12 @@ GHOSTS:
 
 
 
+# GHOST MODES
+
+.equ MODE_NONE, 0
+.equ MODE_CHASE, 1
+.equ MODE_SCATTER, 2
+.equ MODE_FRIGHTENED, 3
 
 
 
@@ -702,8 +710,21 @@ main:
   cmpb $0, %r8b  # ie %r8b doesnt contain any wall flag
   jne .choose_ghost_direction_next  # this direction is not possible
 
-  call .new_random_number
-  movl LAST_RANDOM_NUMBER, %r15d  # distance to the target tile
+  # chase mode: TODO
+  mov $PACMAN, %rbx
+  subl CHAR_X(%rbx), %r12d  # r12 = tile x - target x
+  imull %r12d, %r12d  # r12 = (x-x')^2
+  subl CHAR_Y(%rbx), %r13d  # r13 = tile y - current y
+  imull %r13d, %r13d  # r13 = (y-y')^2
+  addl %r13d, %r12d  # r12 = (x-x')^2 + (y-y')^2
+  mov %r12d, %r15d
+
+  # scatter mode: TODO
+
+
+  # frightened mode: move at random
+  /* call .new_random_number */
+  /* movl LAST_RANDOM_NUMBER, %r15d  # distance to the target tile */
 
   cmpl %r15d, %r10d
   jb .choose_ghost_direction_next
