@@ -139,6 +139,9 @@ fd_set:
 
 .lcomm BOARD, BOARD_WIDTH*BOARD_HEIGHT
 
+.lcomm FAKE_FRAMEBUFFER, PIX_WIDTH*PIX_HEIGHT*4
+.equ FAKE_FRAMEBUFFER_SIZE, PIX_WIDTH*PIX_HEIGHT*4
+
 .equ CHAR_SIZE, 12
 
 
@@ -1438,26 +1441,20 @@ main:
 
 
 
-  # board is drawn (hopefully)
+  # board is drawn (hopefully), now write the framebuffer
+  call .write_framebuffer
+
   ret
 
 
 
 
-.draw_pixel:  # x=r10, y=r11, color=r9
-  mov 16(%rbp), %ebx
-  add %r10, %rbx
-  imul 24(%rbp), %ebx
-  shr $3, %rbx
-
-  mov 20(%rbp), %ecx
-  add %r11, %rcx
-  imul 128(%rbp), %ecx
-
-  add %rbx, %rcx
-  add fb_map, %rcx
-
-  movl %r9d, (%rcx)
+.draw_pixel:  # x=r10, y=r11, color=r9  - draws in the fake framebuffer
+  mov %r11, %rcx
+  imul $PIX_WIDTH, %rcx
+  add %r10, %rcx
+  imul $4, %rcx
+  movl %r9d, FAKE_FRAMEBUFFER(%rcx)
   ret
 
 
@@ -1529,6 +1526,50 @@ main:
   cmp $TILE_SIZE, %r15
   jne .draw_unicolor_tile__x
   ret
+
+
+
+
+.write_framebuffer:  # write fake_framebuffer on the real framebuffer
+  push %r8
+
+  movl $0, %r10d  # x
+  movl $0, %r11d  # y
+  movl $0, %r8d  # fake framebuffer offset
+
+.write_framebuffer_loop:
+  mov 16(%rbp), %ebx
+  add %r10, %rbx
+  imul 24(%rbp), %ebx
+  shr $3, %rbx
+
+  mov 20(%rbp), %ecx
+  add %r11, %rcx
+  imul 128(%rbp), %ecx
+
+  add %rbx, %rcx
+  add fb_map, %rcx
+
+  movl FAKE_FRAMEBUFFER(%r8d), %r9d
+  movl %r9d, (%rcx)
+
+
+  addl $4, %r8d
+
+  addl $1, %r10d
+  cmp $PIX_WIDTH, %r10d
+  jne .write_framebuffer_loop
+  movl $0, %r10d
+  addl $1, %r11d
+  cmp $PIX_HEIGHT, %r11d
+  jne .write_framebuffer_loop
+
+  pop %r8
+  ret
+
+
+
+
 
 
 
