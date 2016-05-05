@@ -51,7 +51,7 @@ sigaction_handler:  # __rt_sigaction
   .quad 0
   .fill 128, 1, 0
 
-.equ TIMEOUT, 30  # watchdog timeout - cf SIGALARM
+.equ TIMEOUT, 90  # watchdog timeout - cf SIGALARM
 
 
 # IOCTL
@@ -161,31 +161,34 @@ fd_set:
 .equ DIRECTION_X, 0
 .equ DIRECTION_Y, 4
 .equ DIRECTION_OPPOSITE, 8
+.equ DIRECTION_NEXT, 12
 
-.equ DIRECTION_STRUCT_SIZE, 12
+.equ DIRECTION_STRUCT_SIZE, 16
 
 .equ DIRECTION_NONE, 0
 .equ DIRECTION_UP, DIRECTION_STRUCT_SIZE*1
 .equ DIRECTION_LEFT, DIRECTION_STRUCT_SIZE*2
 .equ DIRECTION_DOWN, DIRECTION_STRUCT_SIZE*3
 .equ DIRECTION_RIGHT, DIRECTION_STRUCT_SIZE*4
+.equ DIRECTION_CUSTOM, DIRECTION_STRUCT_SIZE*5
 
 .equ FIRST_DIRECTION, DIRECTION_UP
 .equ FIRST_DIRECTION_NOHUP, DIRECTION_LEFT
 .equ LAST_DIRECTION, DIRECTION_RIGHT
 
-DIRECTION_VALUES:  # x, y, opposite direction
-  .long 0 , 0 , DIRECTION_NONE  # none
-  .long 0 , -1, DIRECTION_DOWN  # up
-  .long -1, 0 , DIRECTION_RIGHT  # left
-  .long 0 , 1 , DIRECTION_UP  # down
-  .long 1 , 0 , DIRECTION_LEFT  # right
+DIRECTION_VALUES:  # x, y, opposite direction, next direction
+  .long 0 , 0 , DIRECTION_NONE, DIRECTION_NONE  # none
+  .long 0 , -1, DIRECTION_DOWN, DIRECTION_LEFT  # up
+  .long -1, 0 , DIRECTION_RIGHT, DIRECTION_DOWN  # left
+  .long 0 , 1 , DIRECTION_UP, DIRECTION_RIGHT  # down
+  .long 1 , 0 , DIRECTION_LEFT, DIRECTION_UP  # right
+  .long 0 , 0 , DIRECTION_NONE, DIRECTION_NONE  # custom
 
 
 # STATE
 # positions are in tiles + ratio/TILE_RESOLUTION
 
-  # pacman & ghosts got the same struct discribed below,
+  # pacman & ghosts got the same struct described below,
   # excepts that pacman doesnt have a home corner tile
   # note: everything is 4 byte
 .equ CHAR_X, 0
@@ -220,7 +223,7 @@ CHARACTERS:
 GHOSTS:
   .quad BLINKY, PINKY, INKY, CLYDE, 0
 
-.equ START_PACMAN_LIFES, 3
+.equ START_PACMAN_LIFES, 30
 .lcomm PACMAN_LIFES, 4
 
 
@@ -1186,7 +1189,6 @@ main:
 
 
 .get_tile_type: # x=r12, y=r13
-                # uses r14 (as board index).
                 # x & y can overflow (ie <0 or >board_width/height - they be wrapped
                 # returns in r8b
 
@@ -1232,6 +1234,27 @@ main:
   pop %r12
 
   ret
+
+
+
+
+
+.get_adjacent_tile_type:  # x=r12, y=r13, direction=r15
+  push %r12
+  push %r13
+
+  addl (DIRECTION_VALUES+DIRECTION_X)(%r15), %r12d
+  addl (DIRECTION_VALUES+DIRECTION_Y)(%r15), %r13d
+
+  call .get_tile_type
+
+  pop %r13
+  pop %r12
+
+  ret
+
+
+
 
 
 
@@ -1302,10 +1325,228 @@ main:
   jmp .draw_board__empty
 
 
+
+
+
+
+
 .draw_board__wall:
-  mov $0x0000ff, %r9
+  # all black except a blue one-pixel-wide line, depending on the adjacent tiles
+  mov $0x000000, %r9
   call .draw_unicolor_tile
+
+  #       #
+  #      ?#?    at most 1 ? is a wall
+  #       #
+.draw_board__wall__horizontal:
+  movl $DIRECTION_UP, %r15d
+  call .get_adjacent_tile_type
+  cmpb $TILE_WALL, %r8b
+  jne .draw_board__wall__vertical
+  movl $DIRECTION_DOWN, %r15d
+  call .get_adjacent_tile_type
+  cmpb $TILE_WALL, %r8b
+  jne .draw_board__wall__vertical
+
+  movl $DIRECTION_RIGHT, %r15d
+  call .get_adjacent_tile_type
+  cmpb $TILE_WALL, %r8b
+  jne .draw_board__wall__horizontal_valid
+  movl $DIRECTION_LEFT, %r15d
+  call .get_adjacent_tile_type
+  cmpb $TILE_WALL, %r8b
+  jne .draw_board__wall__horizontal_valid
+  jmp .draw_board__wall__inner_corner  # the 4 tiles are walls: its an inner corner
+
+.draw_board__wall__horizontal_valid:
+  push %r12
+  push %r13
+
+  movl %r12d, %r10d
+  imull $TILE_SIZE, %r10d
+  addl $TILE_SIZE/2, %r10d  # x
+  movl %r13d, %r11d
+  imull $TILE_SIZE, %r11d  # y
+  movl $DIRECTION_DOWN, %r12d  # line direction
+  movl $TILE_SIZE, %r13d   # length
+  mov $0x0000ff, %r9  # color
+  call .draw_line
+
+  pop %r13
+  pop %r12
   jmp .draw_board__afterdraw
+
+
+
+  #       ?
+  #      ###    at most 1 ? is a wall
+  #       ?
+  # at this point we're sure there is not 4 walls: no need to check for the ? as empty tiles
+.draw_board__wall__vertical:
+  movl %r15d, %ecx  # backup horizontal empty tile
+  movl $DIRECTION_LEFT, %r15d
+  call .get_adjacent_tile_type
+  cmpb $TILE_WALL, %r8b
+  jne .draw_board__wall__outer_corner
+  movl $DIRECTION_RIGHT, %r15d
+  call .get_adjacent_tile_type
+  cmpb $TILE_WALL, %r8b
+  jne .draw_board__wall__outer_corner
+
+  push %r12
+  push %r13
+
+  movl %r12d, %r10d
+  imull $TILE_SIZE, %r10d  # x
+  movl %r13d, %r11d
+  imull $TILE_SIZE, %r11d
+  addl $TILE_SIZE/2, %r11d  # y
+  movl $DIRECTION_RIGHT, %r12d  # line direction
+  movl $TILE_SIZE, %r13d   # length
+  mov $0x0000ff, %r9  # color
+  call .draw_line
+
+  pop %r13
+  pop %r12
+  je .draw_board__afterdraw
+
+
+
+  #       #
+  #      ##     in any of the 4 directions
+  #
+  # at this point we're sure there is no two opposite walls
+  # and there cant be only one wall
+  # we also got the vertical empty tile in %ecx
+  # and the horizontal one in %r15d
+  # we just have to check which one is the predecessor
+.draw_board__wall__outer_corner:
+  cmpl %ecx, (DIRECTION_VALUES+DIRECTION_NEXT)(%r15d)
+  je .draw_board__wall__corner
+  movl %ecx, %r15d
+  jmp .draw_board__wall__corner
+
+
+
+  #       ##
+  #      ###    in any of the 4 directions
+  #      ###
+  # at this point we only know the 4 adjacent tiles are walls
+.draw_board__wall__inner_corner:
+  movl $FIRST_DIRECTION, %r14d  # current direction beeing looked at
+  movl $DIRECTION_CUSTOM, %r15d  # to lookup .get_adjacent_tile_type
+.draw_board__wall__inner_corner_loop:
+  movl (DIRECTION_VALUES+DIRECTION_NEXT)(%r14d), %ecx  # ecx = r14d's next
+
+  movl (DIRECTION_VALUES+DIRECTION_X)(%ecx), %r10d
+  movl (DIRECTION_VALUES+DIRECTION_Y)(%ecx), %r11d
+  subl (DIRECTION_VALUES+DIRECTION_X)(%r14d), %r10d
+  subl (DIRECTION_VALUES+DIRECTION_Y)(%r14d), %r11d
+  movl %r10d, (DIRECTION_VALUES+DIRECTION_X+DIRECTION_CUSTOM)
+  movl %r11d, (DIRECTION_VALUES+DIRECTION_Y+DIRECTION_CUSTOM)
+  call .get_adjacent_tile_type
+  cmpb $TILE_WALL, %r8b
+  jne .draw_board__wall__inner_corner_end
+  cmp $LAST_DIRECTION, %r14d
+  je .draw_board__wall__corner  # should not happen: at least one direction before should be ok
+  addl $DIRECTION_STRUCT_SIZE, %r14d
+  jmp .draw_board__wall__inner_corner_loop
+
+.draw_board__wall__inner_corner_end:  # current corner (r14) is the right one
+                                      # move the corresponding one into r15 to display it
+  movl (DIRECTION_VALUES+DIRECTION_NEXT)(%r14d), %r15d
+  movl (DIRECTION_VALUES+DIRECTION_OPPOSITE)(%r15d), %r15d
+  jmp .draw_board__wall__corner
+
+
+
+
+  # we got a corner. the first direction is in r15d
+.draw_board__wall__corner:
+  mov $0x0000ff, %r9  # color
+  movl (DIRECTION_VALUES+DIRECTION_NEXT)(%r15d), %ecx  # ecx = r15d's next
+
+  # draw the diagonal
+  # the diagonal line direction is d1 - d0, ie r12d = custom[(ecx) - (r15d)]
+  push %r12
+  push %r13
+
+  movl (DIRECTION_VALUES+DIRECTION_X)(%ecx), %r10d
+  movl (DIRECTION_VALUES+DIRECTION_Y)(%ecx), %r11d
+  subl (DIRECTION_VALUES+DIRECTION_X)(%r15d), %r10d
+  subl (DIRECTION_VALUES+DIRECTION_Y)(%r15d), %r11d
+  movl %r10d, (DIRECTION_VALUES+DIRECTION_X+DIRECTION_CUSTOM)
+  movl %r11d, (DIRECTION_VALUES+DIRECTION_Y+DIRECTION_CUSTOM)
+
+  movl %r12d, %r10d
+  imull $TILE_SIZE, %r10d  # x
+  addl $TILE_SIZE/2, %r10d
+  movl %r13d, %r11d
+  imull $TILE_SIZE, %r11d
+  addl $TILE_SIZE/2, %r11d  # y
+
+  # move x,y in (r15d's next) opposite direction * TILE_SIZE/2
+  imull $TILE_SIZE/-4, (DIRECTION_VALUES+DIRECTION_X)(%ecx), %ebx
+  addl %ebx, %r10d
+  imull $TILE_SIZE/-4, (DIRECTION_VALUES+DIRECTION_Y)(%ecx), %ebx
+  addl %ebx, %r11d
+
+  movl $TILE_SIZE/4+1, %r13d   # length
+  movl $DIRECTION_CUSTOM, %r12d  # line direction
+  call .draw_line
+  pop %r13
+  pop %r12
+
+
+  # draw the first line to the diagonal
+  push %r12
+  push %r13
+
+  movl %r12d, %r10d
+  imull $TILE_SIZE, %r10d
+  addl $TILE_SIZE/2, %r10d  # x
+  movl %r13d, %r11d
+  imull $TILE_SIZE, %r11d
+  addl $TILE_SIZE/2, %r11d  # y
+  imull $TILE_SIZE/-2, (DIRECTION_VALUES+DIRECTION_X)(%r15d), %ebx
+  addl %ebx, %r10d
+  imull $TILE_SIZE/-2, (DIRECTION_VALUES+DIRECTION_Y)(%r15d), %ebx
+  addl %ebx, %r11d
+
+  movl %r15d, %r12d  # line direction
+  movl $TILE_SIZE/4, %r13d   # length
+  call .draw_line
+  pop %r13
+  pop %r12
+
+  # draw the second line from the diagonal
+  push %r12
+  push %r13
+
+  movl %r12d, %r10d
+  imull $TILE_SIZE, %r10d
+  addl $TILE_SIZE/2, %r10d  # x
+  movl %r13d, %r11d
+  imull $TILE_SIZE, %r11d
+  addl $TILE_SIZE/2, %r11d  # y
+  imull $TILE_SIZE/-2, (DIRECTION_VALUES+DIRECTION_X)(%ecx), %ebx
+  addl %ebx, %r10d
+  imull $TILE_SIZE/-2, (DIRECTION_VALUES+DIRECTION_Y)(%ecx), %ebx
+  addl %ebx, %r11d
+
+  movl %ecx, %r12d  # line direction
+  movl $TILE_SIZE/4, %r13d   # length
+  call .draw_line
+  pop %r13
+  pop %r12
+
+  jmp .draw_board__afterdraw
+
+
+
+
+
+
 
 .draw_board__ghost_wall:
   mov $0x0000aa, %r9
@@ -1449,12 +1690,41 @@ main:
 
 
 
+.draw_line:  # a=(r10,r11), direction=r12, len=r13,  color=r9
+             # note: the len is in step, not in segment length
+  push %r10
+  push %r11
+  push %r15  # loops from 0 to len
+
+  movl $0, %r15d
+.draw_line_loop:
+  call .draw_pixel
+  addl $1, %r15d
+  addl (DIRECTION_VALUES+DIRECTION_X)(%r12d), %r10d
+  addl (DIRECTION_VALUES+DIRECTION_Y)(%r12d), %r11d
+  cmpl %r15d, %r13d
+  jne .draw_line_loop
+
+  pop %r15
+  pop %r11
+  pop %r10
+  ret
+
+
+
+
+
+
 .draw_pixel:  # x=r10, y=r11, color=r9  - draws in the fake framebuffer
+  push %rcx
+
   mov %r11, %rcx
   imul $PIX_WIDTH, %rcx
   add %r10, %rcx
   imul $4, %rcx
   movl %r9d, FAKE_FRAMEBUFFER(%rcx)
+
+  pop %rcx
   ret
 
 
@@ -1532,6 +1802,7 @@ main:
 
 .write_framebuffer:  # write fake_framebuffer on the real framebuffer
   push %r8
+  push %rcx
 
   movl $0, %r10d  # x
   movl $0, %r11d  # y
@@ -1564,6 +1835,7 @@ main:
   cmp $PIX_HEIGHT, %r11d
   jne .write_framebuffer_loop
 
+  pop %rcx
   pop %r8
   ret
 
