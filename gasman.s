@@ -168,6 +168,7 @@ fd_set:
 .equ DIRECTION_RIGHT, DIRECTION_STRUCT_SIZE*4
 
 .equ FIRST_DIRECTION, DIRECTION_UP
+.equ FIRST_DIRECTION_NOHUP, DIRECTION_LEFT
 .equ LAST_DIRECTION, DIRECTION_RIGHT
 
 DIRECTION_VALUES:  # x, y, opposite direction
@@ -712,9 +713,26 @@ main:
 
   # the ghost is centered: choose the next direction to take
   movl CHAR_DIRECTION(%rsi), %r9d  # current ghost direction - to check for the opposite one
-  movl $FIRST_DIRECTION, %eax  # current direction beeing looked at
   movl $0xffffffff, %r10d  # current minimum distance
   movl %r9d, %r11d  # current minimum distance direction
+
+
+  # choose first direction to look at: either will go throw all, or all except 'up'
+  # if the ghost is standing on a 'nohup' tile
+
+  movl CHAR_X(%rsi), %r12d  # current ghost position x
+  movl CHAR_Y(%rsi), %r13d  # current ghost position y
+  call .get_tile_type
+  andb $TILE_NOHUP, %r8b
+  cmpb $0, %r8b
+  jne .choose_ghost_direction_nohup
+
+  movl $FIRST_DIRECTION, %eax  # current direction beeing looked at
+  jmp .choose_ghost_direction_loop
+
+.choose_ghost_direction_nohup:
+  movl $FIRST_DIRECTION_NOHUP, %eax
+
 .choose_ghost_direction_loop:
   cmpl %r9d, (DIRECTION_VALUES+DIRECTION_OPPOSITE)(%eax)
   je .choose_ghost_direction_next  # ghost can't go backwards
