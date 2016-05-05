@@ -129,7 +129,7 @@ fd_set:
 
 .equ TILE_SIZE, 16
 
-.equ TILE_RESOLUTION, 8
+.equ TILE_RESOLUTION, 1600
 
 .equ BOARD_WIDTH, 28
 .equ BOARD_HEIGHT, 36
@@ -197,8 +197,9 @@ DIRECTION_VALUES:  # x, y, opposite direction
 .equ CHAR_START_Y_RATIO, 40
 .equ CHAR_CURRENT_MODE, 44
 .equ CHAR_CURRENT_MODE_TIMEOUT, 48
+.equ CHAR_SPEED, 52  # unit: resoltion / tick
 
-.equ CHAR_STRUCT_SIZE, 52
+.equ CHAR_STRUCT_SIZE, 56
 
 
 
@@ -217,6 +218,14 @@ GHOSTS:
 
 .equ START_PACMAN_LIFES, 3
 .lcomm PACMAN_LIFES, 4
+
+
+# LEVELS
+
+.equ PACMAN_STARTING_SPEED, 200
+.equ GHOST_STARTING_SPEED, 160
+
+.equ TUNNEL_GHOST_SPEED, GHOST_STARTING_SPEED/2
 
 
 
@@ -432,6 +441,15 @@ main:
 
   movl $DIRECTION_NONE, CHAR_DIRECTION(%rsi)
 
+  cmp $PACMAN, %rsi
+  jne .spawn__set_position_is_ghost
+  movl $PACMAN_STARTING_SPEED, CHAR_SPEED(%rsi)
+  jmp .spawn__set_position_next
+
+.spawn__set_position_is_ghost:
+  movl $GHOST_STARTING_SPEED, CHAR_SPEED(%rsi)
+
+.spawn__set_position_next:
   add $8, %rdi
   jmp .spawn__set_position
 .spawn__set_position_end:
@@ -764,39 +782,41 @@ main:
 .move_char:  # moves a character (in %rsi) according to its direction. handles board wrap & ratio update
   movl CHAR_DIRECTION(%rsi), %eax
   movl (DIRECTION_VALUES+DIRECTION_X)(%eax), %eax
+  imull CHAR_SPEED(%rsi), %eax
   addl %eax, CHAR_X_RATIO(%rsi)
 
   # if x_ratio >= resolution, then x++
   cmpl $TILE_RESOLUTION, CHAR_X_RATIO(%rsi)
-  jne .check_char_x_min
-  movl $0, CHAR_X_RATIO(%rsi)
+  jl .check_char_x_min
+  subl $TILE_RESOLUTION, CHAR_X_RATIO(%rsi)
   addl $1, CHAR_X(%rsi)
   jmp .move_char_y
 
 .check_char_x_min:
   # if x_ratio < 0, then x--
-  cmpl $-1, CHAR_X_RATIO(%rsi)
-  jne .move_char_y
-  movl $TILE_RESOLUTION-1, CHAR_X_RATIO(%rsi)
+  cmpl $0, CHAR_X_RATIO(%rsi)
+  jge .move_char_y
+  addl $TILE_RESOLUTION, CHAR_X_RATIO(%rsi)
   subl $1, CHAR_X(%rsi)
 
 .move_char_y:
   movl CHAR_DIRECTION(%rsi), %eax
   movl (DIRECTION_VALUES+DIRECTION_Y)(%eax), %eax
+  imull CHAR_SPEED(%rsi), %eax
   addl %eax, CHAR_Y_RATIO(%rsi)
 
   # if y_ratio >= resolution, then y++
   cmpl $TILE_RESOLUTION, CHAR_Y_RATIO(%rsi)
-  jne .check_char_y_min
-  movl $0, CHAR_Y_RATIO(%rsi)
+  jl .check_char_y_min
+  subl $TILE_RESOLUTION, CHAR_Y_RATIO(%rsi)
   addl $1, CHAR_Y(%rsi)
   jmp .move_char_end
 
 .check_char_y_min:
   # if y_ratio < 0, then y--
-  cmpl $-1, CHAR_Y_RATIO(%rsi)
-  jne .move_char_end
-  movl $TILE_RESOLUTION-1, CHAR_Y_RATIO(%rsi)
+  cmpl $0, CHAR_Y_RATIO(%rsi)
+  jge .move_char_end
+  addl $TILE_RESOLUTION, CHAR_Y_RATIO(%rsi)
   subl $1, CHAR_Y(%rsi)
 .move_char_end:
 
@@ -893,6 +913,38 @@ main:
   add $8, %rdi
   jmp .check_ghost_collision
 .check_ghost_collision_end:
+
+
+
+
+
+
+  # update ghost speeds if they're in the tunnel or not
+  mov $0, %rdi  # array offset
+.update_ghost_speed:
+  mov GHOSTS(%rdi), %rsi
+  cmp $0, %rsi  # the array is 0 terminated
+  je .update_ghost_speed_end
+
+  movl CHAR_X(%rsi), %r12d  # current ghost position x
+  movl CHAR_Y(%rsi), %r13d  # current ghost position y
+  call .get_tile_type
+  andb $TILE_TUNNEL, %r8b
+  cmpb $0, %r8b
+  je .update_ghost_speed_normal # no tunnel: set normal speed
+
+  movl $TUNNEL_GHOST_SPEED, CHAR_SPEED(%rsi)
+  jmp .update_ghost_speed_next
+
+.update_ghost_speed_normal:
+  movl $GHOST_STARTING_SPEED, CHAR_SPEED(%rsi)
+
+
+.update_ghost_speed_next:
+  add $8, %rdi
+  jmp .update_ghost_speed
+.update_ghost_speed_end:
+
 
 
 
