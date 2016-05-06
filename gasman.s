@@ -1718,6 +1718,9 @@ main:
 
 
 .draw_board__ghost_wall:
+  mov $0x000000, %r9
+  call .draw_unicolor_tile
+
   push %r12
   push %r13
 
@@ -1933,7 +1936,7 @@ main:
   cmp $0, debug_grid_on
   je .draw_debug_end
 
-  mov $0x000000, %r9
+  mov $0x333333, %r9
 
   # draw lines
   mov $0, %r10  # x in pixels
