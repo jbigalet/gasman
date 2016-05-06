@@ -143,6 +143,8 @@ fd_set:
 .equ FAKE_FRAMEBUFFER_SIZE, PIX_WIDTH*PIX_HEIGHT*4
 
 .equ CHAR_SIZE, 12
+.equ DOT_SIZE, 3
+.equ ENERGIZER_CORNER_SIZE, TILE_SIZE/4
 
 
 # TILE TYPES - as flags
@@ -1741,15 +1743,107 @@ main:
   pop %r12
   jmp .draw_board__afterdraw
 
+
+
+
 .draw_board__dot:
-  mov $0x444444, %r9
+  mov $0x000000, %r9
   call .draw_unicolor_tile
+
+  push %r12
+  push %r13
+  push %r14
+  push %r15
+
+  mov $0xffbbaa, %r9  # color
+
+  movl $-DOT_SIZE/2, %r14d  # offset x
+  movl $-DOT_SIZE/2, %r15d  # offset y
+
+  imull $TILE_SIZE, %r12d  # x
+  addl $TILE_SIZE/2, %r12d  # x
+  imull $TILE_SIZE, %r13d  # y
+  addl $TILE_SIZE/2, %r13d  # x
+.draw_board__dot_loop:
+  movl %r12d, %r10d
+  addl %r14d, %r10d
+  movl %r13d, %r11d
+  addl %r15d, %r11d
+  call .draw_pixel
+  addl $1, %r14d
+  cmpl $(DOT_SIZE+1)/2, %r14d
+  je .draw_board__dot_loop_y
+  jmp .draw_board__dot_loop
+.draw_board__dot_loop_y:
+  mov $-DOT_SIZE/2, %r14d
+  addl $1, %r15d
+  cmpl $(DOT_SIZE+1)/2, %r15d
+  jne .draw_board__dot_loop
+
+  pop %r15
+  pop %r14
+  pop %r13
+  pop %r12
   jmp .draw_board__afterdraw
 
+
+
 .draw_board__energize:
-  mov $0x666666, %r9
+  mov $0xffbbaa, %r9  # color
   call .draw_unicolor_tile
+
+  push %r15
+
+  mov $0, %r15  # current offset
+  mov $0x000000, %r9  # color
+.draw_board__energize_loop:
+  cmpl $ENERGIZER_CORNER_SIZE, %r15d
+  je .draw_board__energize_end
+
+  movl %r12d, %r10d
+  imull $TILE_SIZE, %r10d  # x
+
+  movl %r13d, %r11d
+  imull $TILE_SIZE, %r11d  # y
+  addl %r15d, %r11d
+
+
+  push %r12
+  push %r13
+
+  movl $DIRECTION_RIGHT, %r12d  # line direction
+
+  movl $ENERGIZER_CORNER_SIZE, %r13d
+  subl %r15d, %r13d  # length
+
+  call .draw_line  # top left corner
+
+  addl $TILE_SIZE-1, %r10d
+  movl $DIRECTION_LEFT, %r12d
+  call .draw_line  # top right corner
+
+  addl $TILE_SIZE-1, %r11d
+  subl %r15d, %r11d
+  subl %r15d, %r11d
+  call .draw_line  # bottom right corner
+
+  subl $TILE_SIZE-1, %r10d
+  movl $DIRECTION_RIGHT, %r12d
+  call .draw_line  # bottom left corner
+
+  pop %r13
+  pop %r12
+
+
+  addl $1, %r15d
+  jmp .draw_board__energize_loop
+
+.draw_board__energize_end:
+  pop %r15
   jmp .draw_board__afterdraw
+
+
+
 
 .draw_board__empty:
   mov $0x000000, %r9
