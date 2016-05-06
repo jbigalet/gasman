@@ -154,6 +154,8 @@ fd_set:
 .equ TILE_ENERGIZE, 0x08 # O
 .equ TILE_TUNNEL, 0x10 # T
 .equ TILE_NOHUP, 0x20 # _
+.equ TILE_SQUARE_WALL, 0x40 # @
+.equ TILE_EXTERIOR, 0x80
 
 
 # DIRECTIONS
@@ -511,18 +513,6 @@ main:
 
 
 .main_loop:
-
-  # first tile blinking
-
-  cmpb $0, BOARD
-  je .blink_1
-  movb $0, BOARD
-  jmp .blink_end
-.blink_1:
-  movb $1, BOARD
-.blink_end:
-
-
 
 
 
@@ -1050,6 +1040,12 @@ main:
   cmpb $94, buffer # ^ == ghost wall
   je .read_board__ghost_wall
 
+  cmpb $64, buffer # @ == square wall
+  je .read_board__square_wall
+
+  cmpb $96, buffer # ` == exterior wall
+  je .read_board__exterior_wall
+
   cmpb $66, buffer # B == blinky's start
   je .read_board__blinky
 
@@ -1110,23 +1106,32 @@ main:
   mov $TILE_GHOST_WALL, %r8
   jmp .read_board__set_tile
 
+.read_board__square_wall:
+  mov $(TILE_SQUARE_WALL | TILE_WALL), %r8
+  jmp .read_board__set_tile
+
+.read_board__exterior_wall:
+  mov $TILE_EXTERIOR, %r8
+  jmp .read_board__set_tile
+
 .read_board__pacman:
   mov $PACMAN, %rsi  # set current char to pacman
-  jmp .read_board__character_spawn
+  jmp .read_board__character_spawn_default
 
 .read_board__blinky:
   mov $BLINKY, %rsi
-  jmp .read_board__character_spawn
+  jmp .read_board__character_spawn_default
 
 .read_board__inky:
   mov $INKY, %rsi
-  jmp .read_board__character_spawn
+  jmp .read_board__character_spawn_default
 
 .read_board__pinky:
   mov $PINKY, %rsi
-  jmp .read_board__character_spawn
+  jmp .read_board__character_spawn_default
 
 .read_board__clyde:
+  mov $TILE_EXTERIOR, %r8  # special case: clyde is sitting on an exterior wall
   mov $CLYDE, %rsi
   jmp .read_board__character_spawn
 
@@ -1154,9 +1159,12 @@ main:
   movl %r13d, CHAR_START_Y(%rsi)
   movl $0, CHAR_START_X_RATIO(%rsi)
   movl $TILE_RESOLUTION/2, CHAR_START_Y_RATIO(%rsi)
-  # character tile defaults to empty
-  mov $0, %r8
   jmp .read_board__set_tile
+
+.read_board__character_spawn_default:
+  mov $0, %r8  # character tile defaults to empty
+  jmp .read_board__character_spawn
+
 
 .read_board__character_corner:
   # uses %rsi as the current character
@@ -1237,6 +1245,40 @@ main:
 
 
 
+.get_tile_type_no_wrap: # x=r12, y=r13. returns in r8b. returns TILE_EMPTY if overflows
+  push %r14
+
+  # check if y < 0
+  cmpl $0, %r13d
+  jl .get_tile_type_no_wrap__overflow
+
+  # check if y >= height
+  cmpl $BOARD_HEIGHT, %r13d
+  jge .get_tile_type_no_wrap__overflow
+
+  # check if x < 0
+  cmpl $0, %r12d
+  jl .get_tile_type_no_wrap__overflow
+
+  # check if x >= width
+  cmpl $BOARD_WIDTH, %r12d
+  jge .get_tile_type_no_wrap__overflow
+
+  mov $BOARD_WIDTH, %r14
+  imul %r13, %r14
+  add %r12, %r14
+  movb BOARD(%r14), %r8b
+  jmp .get_tile_type_no_wrap__done
+
+.get_tile_type_no_wrap__overflow:
+  movb $TILE_EXTERIOR, %r8b
+
+.get_tile_type_no_wrap__done:
+  pop %r14
+  ret
+
+
+
 
 
 .get_adjacent_tile_type:  # x=r12, y=r13, direction=r15
@@ -1254,6 +1296,20 @@ main:
   ret
 
 
+
+.get_adjacent_tile_type_no_wrap:  # x=r12, y=r13, direction=r15. returns TILE_EMPTY if overflows
+  push %r12
+  push %r13
+
+  addl (DIRECTION_VALUES+DIRECTION_X)(%r15), %r12d
+  addl (DIRECTION_VALUES+DIRECTION_Y)(%r15), %r13d
+
+  call .get_tile_type_no_wrap
+
+  pop %r13
+  pop %r12
+
+  ret
 
 
 
@@ -1306,8 +1362,10 @@ main:
 .draw_board__inc_x:
   call .get_tile_type
 
-  cmpb $TILE_WALL, %r8b
-  je .draw_board__wall
+  mov %r8b, %r9b
+  andb $(TILE_WALL | TILE_SQUARE_WALL), %r9b
+  cmpb $0, %r9b
+  jne .draw_board__wall
 
   cmpb $TILE_GHOST_WALL, %r8b
   je .draw_board__ghost_wall
@@ -1335,27 +1393,37 @@ main:
   mov $0x000000, %r9
   call .draw_unicolor_tile
 
+  mov $0, %edx  # special case if we're drawing the tunnel
+
   #       #
   #      ?#?    at most 1 ? is a wall
   #       #
 .draw_board__wall__horizontal:
   movl $DIRECTION_UP, %r15d
-  call .get_adjacent_tile_type
-  cmpb $TILE_WALL, %r8b
-  jne .draw_board__wall__vertical
+  call .get_adjacent_tile_type_no_wrap
+  movb %r8b, %al
+  andb $(TILE_WALL | TILE_SQUARE_WALL | TILE_GHOST_WALL | TILE_EXTERIOR), %al
+  cmpb $0, %al
+  je .draw_board__wall__vertical
   movl $DIRECTION_DOWN, %r15d
-  call .get_adjacent_tile_type
-  cmpb $TILE_WALL, %r8b
-  jne .draw_board__wall__vertical
+  call .get_adjacent_tile_type_no_wrap
+  movb %r8b, %al
+  andb $(TILE_WALL | TILE_SQUARE_WALL | TILE_GHOST_WALL | TILE_EXTERIOR), %al
+  cmpb $0, %al
+  je .draw_board__wall__vertical
 
   movl $DIRECTION_RIGHT, %r15d
-  call .get_adjacent_tile_type
-  cmpb $TILE_WALL, %r8b
-  jne .draw_board__wall__horizontal_valid
+  call .get_adjacent_tile_type_no_wrap
+  movb %r8b, %al
+  andb $(TILE_WALL | TILE_SQUARE_WALL | TILE_GHOST_WALL | TILE_EXTERIOR), %al
+  cmpb $0, %al
+  je .draw_board__wall__horizontal_valid
   movl $DIRECTION_LEFT, %r15d
-  call .get_adjacent_tile_type
-  cmpb $TILE_WALL, %r8b
-  jne .draw_board__wall__horizontal_valid
+  call .get_adjacent_tile_type_no_wrap
+  movb %r8b, %al
+  andb $(TILE_WALL | TILE_SQUARE_WALL | TILE_GHOST_WALL | TILE_EXTERIOR), %al
+  cmpb $0, %al
+  je .draw_board__wall__horizontal_valid
   jmp .draw_board__wall__inner_corner  # the 4 tiles are walls: its an inner corner
 
 .draw_board__wall__horizontal_valid:
@@ -1374,25 +1442,30 @@ main:
 
   pop %r13
   pop %r12
-  jmp .draw_board__afterdraw
+  jmp .draw_board__wall__check_exterior_wall
 
 
 
   #       ?
-  #      ###    at most 1 ? is a wall
+  #      ###    at most 1 ? is a wall  - except if one of the # is exterior: then both need to be empty
   #       ?
   # at this point we're sure there is not 4 walls: no need to check for the ? as empty tiles
 .draw_board__wall__vertical:
   movl %r15d, %ecx  # backup horizontal empty tile
   movl $DIRECTION_LEFT, %r15d
-  call .get_adjacent_tile_type
-  cmpb $TILE_WALL, %r8b
-  jne .draw_board__wall__outer_corner
+  call .get_adjacent_tile_type_no_wrap
+  movb %r8b, %al
+  andb $(TILE_WALL | TILE_SQUARE_WALL | TILE_GHOST_WALL), %al
+  cmpb $0, %al
+  je .draw_board__wall__outer_corner
   movl $DIRECTION_RIGHT, %r15d
-  call .get_adjacent_tile_type
-  cmpb $TILE_WALL, %r8b
-  jne .draw_board__wall__outer_corner
+  call .get_adjacent_tile_type_no_wrap
+  movb %r8b, %al
+  andb $(TILE_WALL | TILE_SQUARE_WALL | TILE_GHOST_WALL), %al
+  cmpb $0, %al
+  je .draw_board__wall__outer_corner
 
+.draw_board__wall__vertical_draw:
   push %r12
   push %r13
 
@@ -1408,7 +1481,7 @@ main:
 
   pop %r13
   pop %r12
-  je .draw_board__afterdraw
+  je .draw_board__wall__check_exterior_wall
 
 
 
@@ -1416,11 +1489,34 @@ main:
   #      ##     in any of the 4 directions
   #
   # at this point we're sure there is no two opposite walls
-  # and there cant be only one wall
+  # and there cant be only one wall except if there was an overflow (ie tunnel)
+  # so we check if we're drawing the tunnel (ie there is only one tile, then jump away if thats the case)
+  # else, we got 2 walls for sure:
   # we also got the vertical empty tile in %ecx
   # and the horizontal one in %r15d
   # we just have to check which one is the predecessor
 .draw_board__wall__outer_corner:
+
+  # check if we're drawing the tunnel. r15 & ecx are both empty, check for the 2 others
+  movl %r15d, %r10d  # backup r15
+  mov $1, %edx  # set the tunnel flag
+
+  movl (DIRECTION_VALUES+DIRECTION_OPPOSITE)(%r15d), %r15d
+  call .get_adjacent_tile_type_no_wrap
+  andb $(TILE_WALL | TILE_SQUARE_WALL | TILE_GHOST_WALL), %r8b
+  cmpb $0, %r8b
+  je .draw_board__wall__vertical_draw
+
+  movl (DIRECTION_VALUES+DIRECTION_OPPOSITE)(%ecx), %r15d
+  call .get_adjacent_tile_type_no_wrap
+  andb $(TILE_WALL | TILE_SQUARE_WALL | TILE_GHOST_WALL), %r8b
+  cmpb $0, %r8b
+  je .draw_board__wall__vertical_draw
+
+  movl %r10d, %r15d  # restore r15
+  mov $0, %edx  # restore the tunnel flag
+
+
   cmpl %ecx, (DIRECTION_VALUES+DIRECTION_NEXT)(%r15d)
   je .draw_board__wall__corner
   movl %ecx, %r15d
@@ -1444,9 +1540,10 @@ main:
   subl (DIRECTION_VALUES+DIRECTION_Y)(%r14d), %r11d
   movl %r10d, (DIRECTION_VALUES+DIRECTION_X+DIRECTION_CUSTOM)
   movl %r11d, (DIRECTION_VALUES+DIRECTION_Y+DIRECTION_CUSTOM)
-  call .get_adjacent_tile_type
-  cmpb $TILE_WALL, %r8b
-  jne .draw_board__wall__inner_corner_end
+  call .get_adjacent_tile_type_no_wrap
+  andb $(TILE_WALL | TILE_SQUARE_WALL | TILE_GHOST_WALL | TILE_EXTERIOR), %r8b
+  cmpb $0, %r8b
+  je .draw_board__wall__inner_corner_end
   cmp $LAST_DIRECTION, %r14d
   je .draw_board__wall__corner  # should not happen: at least one direction before should be ok
   addl $DIRECTION_STRUCT_SIZE, %r14d
@@ -1466,8 +1563,14 @@ main:
   mov $0x0000ff, %r9  # color
   movl (DIRECTION_VALUES+DIRECTION_NEXT)(%r15d), %ecx  # ecx = r15d's next
 
-  # draw the diagonal
+  # draw the diagonal if its not a squared wall
   # the diagonal line direction is d1 - d0, ie r12d = custom[(ecx) - (r15d)]
+  call .get_tile_type
+  andb $TILE_SQUARE_WALL, %r8b
+  movl $TILE_SIZE/2+1, %eax  # in case the wall is squared, we'll set the length of straight lines to be longer - otherwise we'll overwrite it anyway
+  cmpb $0, %r8b
+  jne .draw_board__wall__corner_lines
+
   push %r12
   push %r13
 
@@ -1497,7 +1600,10 @@ main:
   pop %r13
   pop %r12
 
+  movl $TILE_SIZE/4, %eax  # overwrite the straight line length to be smaller in the case the wall is not squared
 
+
+.draw_board__wall__corner_lines:
   # draw the first line to the diagonal
   push %r12
   push %r13
@@ -1514,7 +1620,7 @@ main:
   addl %ebx, %r11d
 
   movl %r15d, %r12d  # line direction
-  movl $TILE_SIZE/4, %r13d   # length
+  movl %eax, %r13d   # length
   call .draw_line
   pop %r13
   pop %r12
@@ -1535,12 +1641,73 @@ main:
   addl %ebx, %r11d
 
   movl %ecx, %r12d  # line direction
-  movl $TILE_SIZE/4, %r13d   # length
+  movl %eax, %r13d   # length
   call .draw_line
   pop %r13
   pop %r12
 
-  jmp .draw_board__afterdraw
+  jmp .draw_board__wall__check_exterior_wall
+
+
+
+.draw_board__wall__check_exterior_wall:
+  # for any of the 4 adjacent directions
+  # if there is an exterior tile, draw the border
+  movl $FIRST_DIRECTION, %r15d  # current direction beeing looked at
+
+
+.draw_board__wall__check_exterior_wall_loop:
+  cmpl $1, %edx
+  jne .draw_board__wall__check_exterior_wall_get_tile  # special case: tunnel flag is set, wrap on lookup
+  call .get_adjacent_tile_type
+  jmp .draw_board__wall__check_exterior_wall_get_tile_after
+.draw_board__wall__check_exterior_wall_get_tile:
+  call .get_adjacent_tile_type_no_wrap
+.draw_board__wall__check_exterior_wall_get_tile_after:
+  andb $TILE_EXTERIOR, %r8b
+  cmpb $0, %r8b
+  jne .draw_board__wall__draw_exterior
+
+.draw_board__wall__check_exterior_wall_next:
+  cmp $LAST_DIRECTION, %r15d
+  /* jmp .draw_board__afterdraw */
+  je .draw_board__afterdraw
+
+  addl $DIRECTION_STRUCT_SIZE, %r15d
+  jmp .draw_board__wall__check_exterior_wall_loop
+
+
+.draw_board__wall__draw_exterior:
+  # draw the first line to the diagonal
+  push %r12
+  push %r13
+  push %rcx
+
+  movl (DIRECTION_VALUES+DIRECTION_NEXT)(%r15d), %ecx
+
+  movl %r12d, %r10d
+  imull $TILE_SIZE, %r10d
+  addl $TILE_SIZE/2, %r10d  # x
+  movl %r13d, %r11d
+  imull $TILE_SIZE, %r11d
+  addl $TILE_SIZE/2, %r11d  # y
+  imull $TILE_SIZE/2-1, (DIRECTION_VALUES+DIRECTION_X)(%r15d), %ebx
+  addl %ebx, %r10d
+  imull $TILE_SIZE/2-1, (DIRECTION_VALUES+DIRECTION_Y)(%r15d), %ebx
+  addl %ebx, %r11d
+  imull $TILE_SIZE/-2, (DIRECTION_VALUES+DIRECTION_X)(%ecx), %ebx
+  addl %ebx, %r10d
+  imull $TILE_SIZE/-2, (DIRECTION_VALUES+DIRECTION_Y)(%ecx), %ebx
+  addl %ebx, %r11d
+
+  movl %ecx, %r12d  # line direction
+  movl $TILE_SIZE+1, %r13d   # length
+  call .draw_line
+  pop %rcx
+  pop %r13
+  pop %r12
+
+  jmp .draw_board__wall__check_exterior_wall_next
 
 
 
@@ -1549,8 +1716,29 @@ main:
 
 
 .draw_board__ghost_wall:
-  mov $0x0000aa, %r9
-  call .draw_unicolor_tile
+  push %r12
+  push %r13
+
+  movl %r12d, %r10d
+  imull $TILE_SIZE, %r10d  # x
+  movl %r13d, %r11d
+  imull $TILE_SIZE, %r11d
+  addl $2*TILE_SIZE/3, %r11d  # y
+
+  movl $DIRECTION_RIGHT, %r12d  # line direction
+  movl $TILE_SIZE, %r13d  # length
+  mov $0xff88ff, %r9  # color
+
+  call .draw_line
+
+  addl $1, %r11d
+  call .draw_line
+
+  addl $1, %r11d
+  call .draw_line
+
+  pop %r13
+  pop %r12
   jmp .draw_board__afterdraw
 
 .draw_board__dot:
