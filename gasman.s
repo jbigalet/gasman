@@ -143,6 +143,7 @@ fd_set:
 .equ FAKE_FRAMEBUFFER_SIZE, PIX_WIDTH*PIX_HEIGHT*4
 
 .equ CHAR_SIZE, 12
+.equ PACMAN_CIRCLE_RADIUS, 10
 .equ DOT_SIZE, 3
 .equ ENERGIZER_CORNER_SIZE, TILE_SIZE/4
 
@@ -1873,8 +1874,7 @@ main:
   # then draw the debug grid on top
 
   mov $PACMAN, %rsi  # set current char to pacman
-  mov $0xffff00, %r9  # pacman is yellow
-  call .draw_char
+  call .draw_pacman
 
   mov $BLINKY, %rsi
   mov $0xff0000, %r9
@@ -1896,7 +1896,66 @@ main:
 
 
 
-.draw_char:  # will draw the char pointed by %rsi, wiht %r9 as the color
+
+.draw_pacman:
+  mov $0xffff00, %r9  # pacman is yellow
+
+  # init x
+  imul $TILE_SIZE, CHAR_X(%rsi), %r10d
+  mov $0, %rdx
+  mov $0, %rax
+  imull $TILE_SIZE, CHAR_X_RATIO(%rsi), %eax
+  mov $TILE_RESOLUTION, %rcx
+  idiv %rcx
+  add %eax, %r10d
+
+  # init y
+  imul $TILE_SIZE, CHAR_Y(%rsi), %r11d
+  mov $0, %rdx
+  mov $0, %rax
+  imul $TILE_SIZE, CHAR_Y_RATIO(%rsi), %eax
+  mov $TILE_RESOLUTION, %rcx
+  idiv %rcx
+  add %eax, %r11d
+
+  # loop through the grid of 2*radius*2*radius: if x^2+y^2<r^2, draw the pixel
+  movl  $-PACMAN_CIRCLE_RADIUS, %r14d  # x
+  movl  $-PACMAN_CIRCLE_RADIUS, %r15d  # y
+
+.draw_pacman_loop:
+  movl  %r14d, %r12d
+  imull %r14d, %r12d  # x^2
+  movl  %r15d, %r13d
+  imull %r15d, %r13d  # y^2
+  addl %r13d, %r12d  # r12 = x^2+y^2
+  cmp $(PACMAN_CIRCLE_RADIUS*PACMAN_CIRCLE_RADIUS), %r12d
+  jg .draw_pacman_next
+
+  # pixel is in the circle: draw it
+  push %r10
+  push %r11
+
+  add %r14d, %r10d
+  add %r15d, %r11d
+
+  call .draw_pixel_with_overflow_checks
+
+  pop %r11
+  pop %r10
+
+.draw_pacman_next:
+  addl $1, %r14d
+  cmp $PACMAN_CIRCLE_RADIUS+1, %r14d
+  jne .draw_pacman_loop
+  mov $-PACMAN_CIRCLE_RADIUS, %r14d
+  addl $1, %r15d
+  cmp $PACMAN_CIRCLE_RADIUS+1, %r15d
+  jne .draw_pacman_loop
+  ret
+
+
+
+.draw_char:  # will draw the char pointed by %rsi, with %r9 as the color
   mov $-CHAR_SIZE/2+1, %r14
   mov $-CHAR_SIZE/2+1, %r15
 .char_draw_loop:
