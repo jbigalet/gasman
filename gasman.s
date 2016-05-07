@@ -235,6 +235,7 @@ GHOSTS:
 .equ GHOST_EYE_SIZE, 7
 .equ GHOST_EYE_SEPARATION, 2
 .equ GHOST_PUPIL_SIZE, 3
+.equ GHOST_CAPE_HEIGHT, 3
 
 .equ PACMAN_CIRCLE_RADIUS, 10
 
@@ -253,6 +254,15 @@ GHOSTS:
 PACMAN_FRAMES:  # 0 terminated animation
   .long PACMAN_FRAME_FULL_CIRCLE, PACMAN_FRAME_45_DEG_MOUTH, PACMAN_FRAME_90_DEG_MOUTH, PACMAN_FRAME_90_DEG_MOUTH,  PACMAN_FRAME_45_DEG_MOUTH,  0
 
+
+
+.equ GHOST_FRAME_DURATION, 10  # in game tick
+
+.equ GHOST_FRAME_3_PART_CAPE, 1
+.equ GHOST_FRAME_2_PART_CAPE, 2
+
+GHOST_FRAMES:  # 0 terminated animation
+  .long GHOST_FRAME_3_PART_CAPE, GHOST_FRAME_2_PART_CAPE, 0
 
 
 # LEVELS
@@ -1905,6 +1915,45 @@ main:
   # now, draw pacman & the ghosts
   # then draw the debug grid on top
 
+  # animation: update pacman's current frame
+  mov $PACMAN, %rsi  # set current char to pacman
+
+  addl $1, CHAR_CURRENT_FRAME_TICK(%rsi)
+  cmpl $PACMAN_FRAME_DURATION, CHAR_CURRENT_FRAME_TICK(%rsi)
+  jne .pacman_post_frame_update
+  movl $0, CHAR_CURRENT_FRAME_TICK(%rsi)
+  addl $4, CHAR_CURRENT_FRAME(%rsi)  # 4 because its a long
+  movl CHAR_CURRENT_FRAME(%rsi), %r9d
+  cmpl $0, PACMAN_FRAMES(%r9d)  # if its the last frame, go back to the first one
+  jne .pacman_post_frame_update
+  movl $0, CHAR_CURRENT_FRAME(%rsi)
+.pacman_post_frame_update:
+
+
+  # animation: update ghosts' current frame
+  mov $0, %rdi  # current ghost index
+.ghost_frame_update:
+  mov GHOSTS(%rdi), %rsi
+  cmp $0, %rsi  # the array is 0 terminated
+  je .ghost_frame_update_end
+
+  addl $1, CHAR_CURRENT_FRAME_TICK(%rsi)
+  cmpl $GHOST_FRAME_DURATION, CHAR_CURRENT_FRAME_TICK(%rsi)
+  jne .ghost_post_frame_update
+  movl $0, CHAR_CURRENT_FRAME_TICK(%rsi)
+  addl $4, CHAR_CURRENT_FRAME(%rsi)  # 4 because its a long
+  movl CHAR_CURRENT_FRAME(%rsi), %r9d
+  cmpl $0, GHOST_FRAMES(%r9d)  # if its the last frame, go back to the first one
+  jne .ghost_post_frame_update
+  movl $0, CHAR_CURRENT_FRAME(%rsi)
+.ghost_post_frame_update:
+  add $8, %rdi
+  jmp .ghost_frame_update
+.ghost_frame_update_end:
+
+
+
+
   mov $PACMAN, %rsi  # set current char to pacman
   call .draw_pacman
 
@@ -1930,19 +1979,6 @@ main:
 
 
 .draw_pacman:
-  # update pacman's current frame
-  addl $1, CHAR_CURRENT_FRAME_TICK(%rsi)
-  cmpl $PACMAN_FRAME_DURATION, CHAR_CURRENT_FRAME_TICK(%rsi)
-  jne .draw_pacman_post_frame_update
-  movl $0, CHAR_CURRENT_FRAME_TICK(%rsi)
-  addl $4, CHAR_CURRENT_FRAME(%rsi)  # 4 because its a long
-  movl CHAR_CURRENT_FRAME(%rsi), %r9d
-  cmpl $0, PACMAN_FRAMES(%r9d)  # if its the last frame, go back to the first one
-  jne .draw_pacman_post_frame_update
-  movl $0, CHAR_CURRENT_FRAME(%rsi)
-
-.draw_pacman_post_frame_update:
-
   mov $0xffff00, %r9  # pacman is yellow
 
   # init x
@@ -2118,8 +2154,46 @@ main:
   jne .draw_ghost_loop
   movl $-GHOST_SIZE/2+1, %r14d
   addl $1, %r15d
-  cmpl $GHOST_SIZE/2, %r15d
+  cmpl $GHOST_SIZE/2-GHOST_CAPE_HEIGHT, %r15d
   jne .draw_ghost_loop
+
+
+
+  # draw the bottom of the cape
+  mov CHAR_CURRENT_FRAME(%rsi), %r12d
+  cmpl $GHOST_FRAME_2_PART_CAPE, GHOST_FRAMES(%r12d)
+  je .draw_ghost_cape_2_part
+  movl $2, %r12d
+  jmp .draw_ghost_cape_loop
+
+.draw_ghost_cape_2_part:
+  movl $0, %r12d
+
+.draw_ghost_cape_loop:
+  call .draw_ghost_pixel  # draw left
+  imull $-1, %r14d
+  call .draw_ghost_pixel  # draw right as the mirror
+  imull $-1, %r14d
+
+.draw_ghost_cape_next:
+  addl $1, %r15d
+  cmpl $GHOST_SIZE/2, %r15d
+  jne .draw_ghost_cape_loop
+  movl $GHOST_SIZE/2-GHOST_CAPE_HEIGHT, %r15d
+  addl $1, %r14d
+  movl %r14d, %r13d
+  addl %r12d, %r13d  # comp r14 to r12
+  cmpl $1, %r13d
+  je .draw_ghost_cape_end  # cursor is in the middle of the cape: end
+  cmpl $-4*GHOST_SIZE/12, %r13d
+  je .draw_ghost_cape_first_chunk  # cursor is past the 1st chunk: jump over a bit
+  jmp .draw_ghost_cape_loop
+.draw_ghost_cape_first_chunk:
+  addl $GHOST_SIZE/4, %r14d
+  jmp .draw_ghost_cape_loop
+.draw_ghost_cape_end:
+
+
 
 
   # draw both eyes
