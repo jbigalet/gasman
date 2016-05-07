@@ -908,10 +908,33 @@ main:
 
 
 .is_ghost_centered:
-  cmpl $TILE_RESOLUTION/2, CHAR_X_RATIO(%rsi)
-  jne .ghost_direction_change_end  # not horizontally centered
-  cmpl $TILE_RESOLUTION/2, CHAR_Y_RATIO(%rsi)
-  jne .ghost_direction_change_end  # not vertically centered
+  # we approximate the center checking to avoid having round speeds
+  # a ghost is centered if speed/2 < abs(x-center_x)
+
+  # compute abs(x-center_x)
+  movl CHAR_X_RATIO(%rsi), %r9d
+  subl $TILE_RESOLUTION/2, %r9d  # r9 = x-center_x
+  movl %r9d, %r10d  # r10 = A = x-center_x
+  sarl $31, %r10d  # r10 = ap = (x-center_x) >>> 31
+  movl %r10d, %r12d  # r12 = ap
+  xorl %r9d, %r12d  # r12 = A xor ap
+  subl %r10d, %r12d  # r12 = (A xor ap) - A = abs(x-center_x)
+  imull $2, %r12d  # r12 = 2*abs(x-center_x)
+  cmpl %r12d, CHAR_SPEED(%rsi)
+  jl .ghost_direction_change_end  # not horizontally centered
+
+  # compute abs(y-center_y)
+  movl CHAR_Y_RATIO(%rsi), %r9d
+  subl $TILE_RESOLUTION/2, %r9d  # r9 = x-center_x
+  movl %r9d, %r10d  # r10 = A = x-center_x
+  sarl $31, %r10d  # r10 = ap = (x-center_x) >>> 31
+  movl %r10d, %r12d  # r12 = ap
+  xorl %r9d, %r12d  # r12 = A xor ap
+  subl %r10d, %r12d  # r12 = (A xor ap) - A = abs(x-center_x)
+  imull $2, %r12d  # r12 = 2*abs(x-center_x)
+  cmpl %r12d, CHAR_SPEED(%rsi)
+  jl .ghost_direction_change_end  # not vertically centered
+
 
   # the ghost is centered: choose the next direction to take
   movl CHAR_DIRECTION(%rsi), %r9d  # current ghost direction - to check for the opposite one
