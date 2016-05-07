@@ -1931,9 +1931,24 @@ main:
   cmp $(PACMAN_CIRCLE_RADIUS*PACMAN_CIRCLE_RADIUS), %r12d
   jge .draw_pacman_next
 
-  # check if pixel is part of pacman's mouth
-  cmp $0, %r14d
-  jle .draw_pacman_pixel   # x < 0: pixel not in the mouth
+  # check if pixel is part of pacman's mouth.
+  # it depends on pacman's direction:
+  #   if direction = right => x <0 0; etc...
+  #   we need x*direction_x <= 0 && y*direction_y <= 0
+
+  movl CHAR_DIRECTION(%rsi), %ebx  # ebx = direction
+
+  movl (DIRECTION_VALUES+DIRECTION_X)(%ebx), %r12d
+  imull %r14d, %r12d
+  cmp $0, %r12d
+  jg .draw_pacman_maybe_in_mouth  # x*dir > 0: pixel in the mouth
+  movl (DIRECTION_VALUES+DIRECTION_Y)(%ebx), %r12d
+  imull %r15d, %r12d
+  cmp $0, %r12d
+  jle .draw_pacman_pixel  # y*dir > 0: pixel in the mouth
+
+
+.draw_pacman_maybe_in_mouth:
 
   # compute r13d = abs(y=r15d) = (y xor yp) - yp, where yp = y >>> 31
   movl %r15d, %r12d
@@ -1950,9 +1965,21 @@ main:
   xorl %r14d, %r13d
   subl %r12d, %r13d  # r&3d = abs(x)
 
+  # if direction is horizontal, need |y| > |x|, else |y| < |x|
+  cmp $0, (DIRECTION_VALUES+DIRECTION_X)(%ebx)
+  jne .draw_pacman_vertical_check
+
+  # horizontal check
   cmp %r13d, %edx
-  jg .draw_pacman_pixel  # |y| > |x|: pixel not in mouth
+  jl .draw_pacman_pixel  # |y| > |x|: pixel not in mouth
   jmp .draw_pacman_next
+
+.draw_pacman_vertical_check:
+  cmp %r13d, %edx
+  jg .draw_pacman_pixel  # |y| < |x|: pixel not in mouth
+  jmp .draw_pacman_next
+
+
 
 .draw_pacman_pixel:
   # pixel is in the circle: draw it
