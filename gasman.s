@@ -953,7 +953,14 @@ main:
   cmpb $0, %r8b  # ie %r8b doesnt contain any wall flag
   jne .choose_ghost_direction_next  # this direction is not possible
 
-  # chase mode: TODO
+  # frightened mode: move at random
+  cmpl $GHOST_STATUS_FRIGHTENED, CHAR_MODE(%rsi)
+  jne .choose_ghost_direction_not_frightened
+  call .new_random_number
+  movl LAST_RANDOM_NUMBER, %r15d  # distance to the target tile
+  jmp .choose_ghost_direction_comparison
+
+.choose_ghost_direction_not_frightened:
   push %r8
   push %r9
 
@@ -966,13 +973,10 @@ main:
   addl %r13d, %r12d  # r12 = (x-x')^2 + (y-y')^2
   mov %r12d, %r15d
 
-  # frightened mode: move at random TODO
-  /* call .new_random_number */
-  /* movl LAST_RANDOM_NUMBER, %r15d  # distance to the target tile */
-
   pop %r9
   pop %r8
 
+.choose_ghost_direction_comparison:
   cmpl %r15d, %r10d
   jb .choose_ghost_direction_next
   mov %r15d, %r10d
@@ -1001,10 +1005,21 @@ main:
 .get_current_target_tile:  # returns in r8, r9
   push %rbx
 
+  # if in frightened mode, take the last mode
+  cmpl $GHOST_MODE_FRIGHTENED, GHOST_CURRENT_MODE
+  jne .get_current_target_tile__check_chase
+
+  # in frightened mode: check the last mode for a chase, or jmp to scatter
+  cmpl $GHOST_MODE_SCATTER, GHOST_MODE_BACKUP
+  jne .get_current_target_tile__chase
+  jmp .get_current_target_tile__scatter
+
+.get_current_target_tile__check_chase:
   # if in scatter mode, the target is the ghost's corner
   cmpl $GHOST_MODE_SCATTER, GHOST_CURRENT_MODE
   jne .get_current_target_tile__chase
 
+.get_current_target_tile__scatter:
   movl CHAR_CORNER_TILE_X(%rsi), %r8d
   movl CHAR_CORNER_TILE_Y(%rsi), %r9d
 
@@ -1192,10 +1207,50 @@ main:
   jmp .pacman_event__dot__counter_loop
 
 
+
+
 .pacman_event__energizer:
   mov $TILE_ENERGIZE, %r8b
   call .remove_flags_from_tile
-  jmp .pacman_event__end
+
+  # change current game mode if not currently in frightened mode
+  cmpl $GHOST_MODE_FRIGHTENED, GHOST_CURRENT_MODE
+  jne .pacman_event__energizer_not_frightened
+
+  # if frightened, just update the timeout
+  movl $GHOST_MODE_FRIGHTENED_TIMER, GHOST_MODE_TIMEOUT
+  jmp .pacman_event__energizer_loop_start
+
+.pacman_event__energizer_not_frightened:
+  movl GHOST_CURRENT_MODE, %eax
+  mov %eax, GHOST_MODE_BACKUP  # backup mode
+  movl GHOST_MODE_TIMEOUT, %eax
+  mov %eax, GHOST_MODE_TIMEOUT_BACKUP  # backup mode timer
+
+  movl $GHOST_MODE_FRIGHTENED, GHOST_CURRENT_MODE  # set the current mode
+  movl $GHOST_MODE_FRIGHTENED_TIMER, GHOST_MODE_TIMEOUT  # set the current mode timer
+
+  # change all the ghost status if outside the house & not eatean
+.pacman_event__energizer_loop_start:
+  mov $0, %rdi
+.pacman_event__energizer_loop:
+  mov GHOSTS(%rdi), %rsi
+  cmp $0, %rsi  # ghost array is 0 terminated
+  je .pacman_event__end
+
+  cmpl $GHOST_HOUSE_STATUS_OUTSIDE, CHAR_GHOST_HOUSE_STATUS(%rsi)  # only change status if oustide
+  jne .pacman_event__energizer_next
+
+  cmpl $GHOST_STATUS_EATEN, CHAR_MODE(%rsi)  # only change status if not eaten
+  je .pacman_event__energizer_next
+
+  movl $GHOST_STATUS_FRIGHTENED, CHAR_MODE(%rsi)
+
+.pacman_event__energizer_next:
+  add $8, %rdi
+  jmp .pacman_event__energizer_loop
+
+
 
 .pacman_event__end:
 
@@ -2411,6 +2466,15 @@ main:
 
 
 .draw_ghost:  # will draw the char pointed by %rsi, with %r9 as the color
+
+  # if the ghost is frightened, the color changes
+  cmpl $GHOST_STATUS_FRIGHTENED, CHAR_MODE(%rsi)
+  jne .draw_ghost_no_color_change
+
+  movl $0x0000ff, %r9d
+
+
+.draw_ghost_no_color_change:
   # init x
   imul $TILE_SIZE, CHAR_X(%rsi), %r10d
   mov $0, %rdx
