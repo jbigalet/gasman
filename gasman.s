@@ -1929,8 +1929,32 @@ main:
   imull %r15d, %r13d  # y^2
   addl %r13d, %r12d  # r12 = x^2+y^2
   cmp $(PACMAN_CIRCLE_RADIUS*PACMAN_CIRCLE_RADIUS), %r12d
-  jg .draw_pacman_next
+  jge .draw_pacman_next
 
+  # check if pixel is part of pacman's mouth
+  cmp $0, %r14d
+  jle .draw_pacman_pixel   # x < 0: pixel not in the mouth
+
+  # compute r13d = abs(y=r15d) = (y xor yp) - yp, where yp = y >>> 31
+  movl %r15d, %r12d
+  sarl $31, %r12d  # r12d = yp = y >>> 31
+  movl %r12d, %r13d  # r13d = yp
+  xorl %r15d, %r13d  # r13d = y xor yp
+  subl %r12d, %r13d  # r13d = (y xor yp) - yp = abs(y)
+  movl %r13d, %edx  # edx = abs(y)
+
+  # same way, compute r13d = abs(x)
+  movl %r14d, %r12d
+  sarl $31, %r12d
+  movl %r12d, %r13d
+  xorl %r14d, %r13d
+  subl %r12d, %r13d  # r&3d = abs(x)
+
+  cmp %r13d, %edx
+  jg .draw_pacman_pixel  # |y| > |x|: pixel not in mouth
+  jmp .draw_pacman_next
+
+.draw_pacman_pixel:
   # pixel is in the circle: draw it
   push %r10
   push %r11
