@@ -210,8 +210,10 @@ DIRECTION_VALUES:  # x, y, opposite direction, next direction
 .equ CHAR_CURRENT_MODE, 44
 .equ CHAR_CURRENT_MODE_TIMEOUT, 48
 .equ CHAR_SPEED, 52  # unit: resoltion / tick
+.equ CHAR_CURRENT_FRAME, 56  # index of the current animation array
+.equ CHAR_CURRENT_FRAME_TICK, 60
 
-.equ CHAR_STRUCT_SIZE, 56
+.equ CHAR_STRUCT_SIZE, 64
 
 
 
@@ -230,6 +232,18 @@ GHOSTS:
 
 .equ START_PACMAN_LIFES, 30
 .lcomm PACMAN_LIFES, 4
+
+
+# ANIMATION
+
+.equ PACMAN_FRAME_DURATION, 10  # in game tick
+
+.equ PACMAN_FRAME_FULL_CIRCLE, 1
+.equ PACMAN_FRAME_90_DEG_MOUTH, 2
+
+PACMAN_FRAMES:  # 0 terminated animation
+  .long PACMAN_FRAME_FULL_CIRCLE, PACMAN_FRAME_90_DEG_MOUTH, 0
+
 
 
 # LEVELS
@@ -1898,6 +1912,19 @@ main:
 
 
 .draw_pacman:
+  # update pacman's current frame
+  addl $1, CHAR_CURRENT_FRAME_TICK(%rsi)
+  cmpl $PACMAN_FRAME_DURATION, CHAR_CURRENT_FRAME_TICK(%rsi)
+  jne .draw_pacman_post_frame_update
+  movl $0, CHAR_CURRENT_FRAME_TICK(%rsi)
+  addl $4, CHAR_CURRENT_FRAME(%rsi)  # 4 because its a long
+  movl CHAR_CURRENT_FRAME(%rsi), %r9d
+  cmpl $0, PACMAN_FRAMES(%r9d)  # if its the last frame, go back to the first one
+  jne .draw_pacman_post_frame_update
+  movl $0, CHAR_CURRENT_FRAME(%rsi)
+
+.draw_pacman_post_frame_update:
+
   mov $0xffff00, %r9  # pacman is yellow
 
   # init x
@@ -1930,6 +1957,12 @@ main:
   addl %r13d, %r12d  # r12 = x^2+y^2
   cmp $(PACMAN_CIRCLE_RADIUS*PACMAN_CIRCLE_RADIUS), %r12d
   jge .draw_pacman_next
+
+  # if pacman is in its first frame, just draw him as a circle
+  movl CHAR_CURRENT_FRAME(%rsi), %r12d
+  cmpl $PACMAN_FRAME_FULL_CIRCLE, PACMAN_FRAMES(%r12d)
+  je .draw_pacman_pixel
+
 
   # check if pixel is part of pacman's mouth.
   # it depends on pacman's direction:
