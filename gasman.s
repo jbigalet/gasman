@@ -207,8 +207,9 @@ DIRECTION_VALUES:  # x, y, opposite direction, next direction
 .equ CHAR_SPEED, 52  # unit: resoltion / tick
 .equ CHAR_CURRENT_FRAME, 56  # index of the current animation array
 .equ CHAR_CURRENT_FRAME_TICK, 60
+.equ CHAR_INSIDE_GHOST_HOUSE, 64
 
-.equ CHAR_STRUCT_SIZE, 64
+.equ CHAR_STRUCT_SIZE, 68
 
 
 
@@ -271,6 +272,7 @@ GHOST_FRAMES:  # 0 terminated animation
 .equ GHOST_STARTING_SPEED, 160
 
 .equ TUNNEL_GHOST_SPEED, GHOST_STARTING_SPEED/2
+.equ GHOST_HOUSE_SPEED, GHOST_STARTING_SPEED/2  # ghosts are slower inside the ghost house
 
 
 
@@ -505,12 +507,22 @@ main:
   movl $DIRECTION_LEFT, CHAR_DIRECTION(%rsi)
 
   # eye debug: ghosts are starting with each a different direction
+  /* mov $INKY, %rsi */
+  /* movl $DIRECTION_UP, CHAR_DIRECTION(%rsi) */
+  /* mov $PINKY, %rsi */
+  /* movl $DIRECTION_RIGHT, CHAR_DIRECTION(%rsi) */
+  /* mov $CLYDE, %rsi */
+  /* movl $DIRECTION_DOWN, CHAR_DIRECTION(%rsi) */
+
+  # update ghost house status
+  mov $BLINKY, %rsi
+  movl $0, CHAR_INSIDE_GHOST_HOUSE(%rsi)
   mov $INKY, %rsi
-  movl $DIRECTION_UP, CHAR_DIRECTION(%rsi)
+  movl $1, CHAR_INSIDE_GHOST_HOUSE(%rsi)
   mov $PINKY, %rsi
-  movl $DIRECTION_RIGHT, CHAR_DIRECTION(%rsi)
+  movl $1, CHAR_INSIDE_GHOST_HOUSE(%rsi)
   mov $CLYDE, %rsi
-  movl $DIRECTION_DOWN, CHAR_DIRECTION(%rsi)
+  movl $1, CHAR_INSIDE_GHOST_HOUSE(%rsi)
 
 
   # draw the board & then sleep for 3 seconds before starting a new round
@@ -743,8 +755,37 @@ main:
 
 
 
-  # handle ghost direction change if they're centered on a tile
-  mov $BLINKY, %rsi
+  # handle ghost direction change if they're centered on a tile or in the ghost house
+  mov $0, %rdi  # ghost array offset
+.handle_ghost_move_loop:
+  mov GHOSTS(%rdi), %rsi
+  cmp $0, %rsi  # the array is 0 terminated
+  je .handle_ghost_move_end
+
+
+  # special behaviour if the ghost is still in the ghost house
+  cmpl $0, CHAR_INSIDE_GHOST_HOUSE(%rsi)
+  je .is_ghost_centered
+
+  cmpl $DIRECTION_NONE, CHAR_DIRECTION(%rsi)
+  je .ghost_house_go_up  # no direction => go up
+
+  # check if the ghost is in a tile intersection: if it is, change direction
+  cmpl $0, CHAR_X_RATIO(%rsi)
+  jne .ghost_direction_change_end
+  cmpl $0, CHAR_Y_RATIO(%rsi)
+  jne .ghost_direction_change_end
+
+  movl CHAR_DIRECTION(%rsi), %eax
+  movl (DIRECTION_VALUES+DIRECTION_OPPOSITE)(%eax), %eax
+  movl %eax, CHAR_DIRECTION(%rsi)
+  jmp .ghost_direction_change_end
+
+.ghost_house_go_up:
+  movl $DIRECTION_UP, CHAR_DIRECTION(%rsi)
+  jmp .ghost_direction_change_end
+
+
 .is_ghost_centered:
   cmpl $TILE_RESOLUTION/2, CHAR_X_RATIO(%rsi)
   jne .ghost_direction_change_end  # not horizontally centered
@@ -818,6 +859,10 @@ main:
   movl %r11d, CHAR_DIRECTION(%rsi)
 
 .ghost_direction_change_end:
+  add $8, %rdi
+  jmp .handle_ghost_move_loop
+
+.handle_ghost_move_end:
 
 
 
@@ -828,8 +873,7 @@ main:
   mov $0, %rdi  # array offset
 .move_char_loop:
   mov CHARACTERS(%rdi), %rsi
-  cmp $PINKY, %rsi  # debug: only move blinky
-  /* cmp $0, %rsi  # the array is 0 terminated */
+  cmp $0, %rsi  # the array is 0 terminated
   je .update_pacman_status
   call .move_char
   add $8, %rdi
@@ -985,6 +1029,10 @@ main:
   cmp $0, %rsi  # the array is 0 terminated
   je .update_ghost_speed_end
 
+  # if the ghost is inside the ghost house, it's slower
+  cmpl $1, CHAR_INSIDE_GHOST_HOUSE(%rsi)
+  je .update_ghost_speed_ghost_house
+
   movl CHAR_X(%rsi), %r12d  # current ghost position x
   movl CHAR_Y(%rsi), %r13d  # current ghost position y
   call .get_tile_type
@@ -995,9 +1043,12 @@ main:
   movl $TUNNEL_GHOST_SPEED, CHAR_SPEED(%rsi)
   jmp .update_ghost_speed_next
 
+.update_ghost_speed_ghost_house:
+  movl $GHOST_HOUSE_SPEED, CHAR_SPEED(%rsi)
+  jmp .update_ghost_speed_next
+
 .update_ghost_speed_normal:
   movl $GHOST_STARTING_SPEED, CHAR_SPEED(%rsi)
-
 
 .update_ghost_speed_next:
   add $8, %rdi
