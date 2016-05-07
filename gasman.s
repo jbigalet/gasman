@@ -142,11 +142,6 @@ fd_set:
 .lcomm FAKE_FRAMEBUFFER, PIX_WIDTH*PIX_HEIGHT*4
 .equ FAKE_FRAMEBUFFER_SIZE, PIX_WIDTH*PIX_HEIGHT*4
 
-.equ CHAR_SIZE, 12
-.equ PACMAN_CIRCLE_RADIUS, 10
-.equ DOT_SIZE, 3
-.equ ENERGIZER_CORNER_SIZE, TILE_SIZE/4
-
 
 # TILE TYPES - as flags
 
@@ -235,6 +230,19 @@ GHOSTS:
 
 
 # ANIMATION
+
+.equ GHOST_SIZE, 24
+.equ GHOST_EYE_SIZE, 7
+.equ GHOST_EYE_SEPARATION, 2
+.equ GHOST_PUPIL_SIZE, 3
+
+.equ PACMAN_CIRCLE_RADIUS, 10
+
+.equ DOT_SIZE, 3
+
+.equ ENERGIZER_CORNER_SIZE, TILE_SIZE/4
+
+
 
 .equ PACMAN_FRAME_DURATION, 5  # in game tick
 
@@ -485,6 +493,14 @@ main:
   # blinky starts going left
   mov $BLINKY, %rsi
   movl $DIRECTION_LEFT, CHAR_DIRECTION(%rsi)
+
+  # eye debug: ghosts are starting with each a different direction
+  mov $INKY, %rsi
+  movl $DIRECTION_UP, CHAR_DIRECTION(%rsi)
+  mov $PINKY, %rsi
+  movl $DIRECTION_RIGHT, CHAR_DIRECTION(%rsi)
+  mov $CLYDE, %rsi
+  movl $DIRECTION_DOWN, CHAR_DIRECTION(%rsi)
 
 
   # draw the board & then sleep for 3 seconds before starting a new round
@@ -802,7 +818,8 @@ main:
   mov $0, %rdi  # array offset
 .move_char_loop:
   mov CHARACTERS(%rdi), %rsi
-  cmp $0, %rsi  # the array is 0 terminated
+  cmp $PINKY, %rsi  # debug: only move blinky
+  /* cmp $0, %rsi  # the array is 0 terminated */
   je .update_pacman_status
   call .move_char
   add $8, %rdi
@@ -1893,19 +1910,19 @@ main:
 
   mov $BLINKY, %rsi
   mov $0xff0000, %r9
-  call .draw_char
+  call .draw_ghost
 
   mov $INKY, %rsi
   mov $0x00ffff, %r9
-  call .draw_char
+  call .draw_ghost
 
   mov $PINKY, %rsi
   mov $0xff00ff, %r9
-  call .draw_char
+  call .draw_ghost
 
   mov $CLYDE, %rsi
   mov $0xff8000, %r9
-  call .draw_char
+  call .draw_ghost
 
   jmp .draw_debug_grid
 
@@ -2053,10 +2070,8 @@ main:
 
 
 
-.draw_char:  # will draw the char pointed by %rsi, with %r9 as the color
-  mov $-CHAR_SIZE/2+1, %r14
-  mov $-CHAR_SIZE/2+1, %r15
-.char_draw_loop:
+.draw_ghost:  # will draw the char pointed by %rsi, with %r9 as the color
+  # init x
   imul $TILE_SIZE, CHAR_X(%rsi), %r10d
   mov $0, %rdx
   mov $0, %rax
@@ -2065,6 +2080,7 @@ main:
   idiv %rcx
   add %eax, %r10d
 
+  # init y
   imul $TILE_SIZE, CHAR_Y(%rsi), %r11d
   mov $0, %rdx
   mov $0, %rax
@@ -2073,18 +2089,114 @@ main:
   idiv %rcx
   add %eax, %r11d
 
-  add %r14, %r10
-  add %r15, %r11
+  # loop throguh the grid & determine if a pixel should be drawn or not
+  movl $-GHOST_SIZE/2+1, %r14d
+  movl $-GHOST_SIZE/2+1, %r15d
+
+.draw_ghost_loop:
+  # if in upper part: check if the current pixel is inside the circle
+  cmpl $0, %r15d
+  jg .draw_ghost_lower_part
+
+  movl  %r14d, %r12d
+  imull %r14d, %r12d  # x^2
+  movl  %r15d, %r13d
+  imull %r15d, %r13d  # y^2
+  addl %r13d, %r12d  # r12 = x^2+y^2
+  cmp $(GHOST_SIZE/2*GHOST_SIZE/2), %r12d
+  jge .draw_ghost_next
+  call .draw_ghost_pixel
+  jmp .draw_ghost_next
+
+.draw_ghost_lower_part:
+  call .draw_ghost_pixel
+  jmp .draw_ghost_next
+
+.draw_ghost_next:
+  add $1, %r14
+  cmpl $GHOST_SIZE/2, %r14d
+  jne .draw_ghost_loop
+  movl $-GHOST_SIZE/2+1, %r14d
+  addl $1, %r15d
+  cmpl $GHOST_SIZE/2, %r15d
+  jne .draw_ghost_loop
+
+
+  # draw both eyes
+  mov $0xffffff, %r9d
+
+  # change local offset to make the eyes move according to the ghost's direction
+  movl CHAR_DIRECTION(%rsi), %eax
+  imull $GHOST_EYE_SEPARATION, (DIRECTION_VALUES+DIRECTION_X)(%eax), %r14d
+  addl %r14d, %r10d
+  subl $1, %r10d
+  imull $GHOST_EYE_SEPARATION, (DIRECTION_VALUES+DIRECTION_Y)(%eax), %r14d
+  addl %r14d, %r11d
+  addl $2, %r11d
+
+  mov $-GHOST_EYE_SIZE, %r14d
+  mov $-GHOST_EYE_SIZE, %r15d
+.draw_ghost_eye_loop:
+  call .draw_ghost_pixel  # left eye
+  addl $GHOST_EYE_SIZE+GHOST_EYE_SEPARATION, %r14d
+  call .draw_ghost_pixel  # right eye
+  subl $GHOST_EYE_SIZE+GHOST_EYE_SEPARATION, %r14d
+.draw_ghost_eye_next:
+  add $1, %r14
+  cmpl $0, %r14d
+  jne .draw_ghost_eye_loop
+  movl $-GHOST_EYE_SIZE, %r14d
+  addl $1, %r15d
+  cmpl $0, %r15d
+  jne .draw_ghost_eye_loop
+
+
+  # draw pupils
+  mov $0x0000ff, %r9d
+
+  # change local offset to draw the pupils: first center them then translate by the ghost's direction
+  subl $GHOST_EYE_SIZE/2+(GHOST_PUPIL_SIZE+1)/2, %r10d
+  subl $GHOST_EYE_SIZE/2+(GHOST_PUPIL_SIZE+1)/2, %r11d
+  imull $GHOST_EYE_SIZE/2-1, (DIRECTION_VALUES+DIRECTION_X)(%eax), %r14d
+  addl %r14d, %r10d
+  imull $GHOST_EYE_SIZE/2-1, (DIRECTION_VALUES+DIRECTION_Y)(%eax), %r14d
+  addl %r14d, %r11d
+
+  mov $0, %r14d
+  mov $0, %r15d
+.draw_ghost_pupil_loop:
+  call .draw_ghost_pixel  # left pupil
+  addl $GHOST_EYE_SIZE+GHOST_EYE_SEPARATION, %r14d
+  call .draw_ghost_pixel  # right pupil
+  subl $GHOST_EYE_SIZE+GHOST_EYE_SEPARATION, %r14d
+.draw_ghost_pupil_next:
+  add $1, %r14
+  cmpl $GHOST_PUPIL_SIZE, %r14d
+  jne .draw_ghost_pupil_loop
+  movl $0, %r14d
+  addl $1, %r15d
+  cmpl $GHOST_PUPIL_SIZE, %r15d
+  jne .draw_ghost_pupil_loop
+
+
+  ret
+
+
+
+.draw_ghost_pixel:
+  push %r10
+  push %r11
+
+  addl %r14d, %r10d
+  addl %r15d, %r11d
 
   call .draw_pixel_with_overflow_checks
-  add $1, %r14
-  cmp $CHAR_SIZE/2, %r14
-  jne .char_draw_loop
-  mov $-CHAR_SIZE/2+1, %r14
-  add $1, %r15
-  cmp $CHAR_SIZE/2, %r15
-  jne .char_draw_loop
+
+  pop %r11
+  pop %r10
+
   ret
+
 
 
 
