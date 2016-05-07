@@ -207,9 +207,10 @@ DIRECTION_VALUES:  # x, y, opposite direction, next direction
 .equ CHAR_SPEED, 52  # unit: resoltion / tick
 .equ CHAR_CURRENT_FRAME, 56  # index of the current animation array
 .equ CHAR_CURRENT_FRAME_TICK, 60
-.equ CHAR_INSIDE_GHOST_HOUSE, 64
+.equ CHAR_GHOST_HOUSE_STATUS, 64
+.equ CHAR_DOT_COUNT, 68
 
-.equ CHAR_STRUCT_SIZE, 68
+.equ CHAR_STRUCT_SIZE, 72
 
 
 
@@ -228,6 +229,13 @@ GHOSTS:
 
 .equ START_PACMAN_LIFES, 30
 .lcomm PACMAN_LIFES, 4
+
+
+  # ghost - ghost house status
+.equ GHOST_HOUSE_STATUS_OUTSIDE, 0
+.equ GHOST_HOUSE_STATUS_INSIDE, 1
+.equ GHOST_HOUSE_STATUS_TRANSITION_TO_CENTER, 2
+.equ GHOST_HOUSE_STATUS_TRANSITION_TO_TOP, 3
 
 
 # ANIMATION
@@ -467,6 +475,15 @@ main:
   movl $START_PACMAN_LIFES, PACMAN_LIFES
 
 
+  # update dot counters
+  # 1st level: pinky = 0, inky = 30, clyde = 60 (ie 90 from the start)
+  mov $INKY, %rsi
+  movl $30, CHAR_DOT_COUNT(%rsi)
+  mov $CLYDE, %rsi
+  movl $90, CHAR_DOT_COUNT(%rsi)
+
+
+
 # game init
 .spawn:
 
@@ -516,13 +533,13 @@ main:
 
   # update ghost house status
   mov $BLINKY, %rsi
-  movl $0, CHAR_INSIDE_GHOST_HOUSE(%rsi)
+  movl $GHOST_HOUSE_STATUS_OUTSIDE, CHAR_GHOST_HOUSE_STATUS(%rsi)
   mov $INKY, %rsi
-  movl $1, CHAR_INSIDE_GHOST_HOUSE(%rsi)
+  movl $GHOST_HOUSE_STATUS_INSIDE, CHAR_GHOST_HOUSE_STATUS(%rsi)
   mov $PINKY, %rsi
-  movl $1, CHAR_INSIDE_GHOST_HOUSE(%rsi)
+  movl $GHOST_HOUSE_STATUS_INSIDE, CHAR_GHOST_HOUSE_STATUS(%rsi)
   mov $CLYDE, %rsi
-  movl $1, CHAR_INSIDE_GHOST_HOUSE(%rsi)
+  movl $GHOST_HOUSE_STATUS_INSIDE, CHAR_GHOST_HOUSE_STATUS(%rsi)
 
 
   # draw the board & then sleep for 3 seconds before starting a new round
@@ -764,8 +781,10 @@ main:
 
 
   # special behaviour if the ghost is still in the ghost house
-  cmpl $0, CHAR_INSIDE_GHOST_HOUSE(%rsi)
+  cmpl $GHOST_HOUSE_STATUS_OUTSIDE, CHAR_GHOST_HOUSE_STATUS(%rsi)
   je .is_ghost_centered
+  cmpl $GHOST_HOUSE_STATUS_INSIDE, CHAR_GHOST_HOUSE_STATUS(%rsi)
+  jne .ghost_direction_change_end
 
   cmpl $DIRECTION_NONE, CHAR_DIRECTION(%rsi)
   je .ghost_house_go_up  # no direction => go up
@@ -1023,6 +1042,7 @@ main:
 
 
   # update ghost speeds if they're in the tunnel or not
+  # also update ghost status (as in: leaving the ghost house)
   mov $0, %rdi  # array offset
 .update_ghost_speed:
   mov GHOSTS(%rdi), %rsi
@@ -1030,8 +1050,8 @@ main:
   je .update_ghost_speed_end
 
   # if the ghost is inside the ghost house, it's slower
-  cmpl $1, CHAR_INSIDE_GHOST_HOUSE(%rsi)
-  je .update_ghost_speed_ghost_house
+  cmpl $GHOST_HOUSE_STATUS_OUTSIDE, CHAR_GHOST_HOUSE_STATUS(%rsi)
+  jne .update_ghost_speed_ghost_house
 
   movl CHAR_X(%rsi), %r12d  # current ghost position x
   movl CHAR_Y(%rsi), %r13d  # current ghost position y
@@ -1045,7 +1065,44 @@ main:
 
 .update_ghost_speed_ghost_house:
   movl $GHOST_HOUSE_SPEED, CHAR_SPEED(%rsi)
-  jmp .update_ghost_speed_next
+
+  # also check if the dot count is 0
+  # if thats the case, the ghost leaves the house
+  # first going to the center (x), then up, then left once out
+  cmp $0, CHAR_DOT_COUNT(%rsi)
+  jne .update_ghost_speed_next
+
+  cmp $GHOST_HOUSE_STATUS_TRANSITION_TO_TOP, CHAR_GHOST_HOUSE_STATUS(%rsi)
+  je .update_ghost_house_status_to_top
+
+  movl $GHOST_HOUSE_STATUS_TRANSITION_TO_CENTER, CHAR_GHOST_HOUSE_STATUS(%rsi)
+  cmp $0, CHAR_X_RATIO(%rsi)
+  jne .update_ghost_speed_next  # not at an intersection
+  cmp $BOARD_WIDTH/2, CHAR_X(%rsi)  # hacky way to check the ghost can leave the house (TODO)
+  jne .update_ghost_speed_next
+
+  movl $GHOST_HOUSE_STATUS_TRANSITION_TO_TOP, CHAR_GHOST_HOUSE_STATUS(%rsi)
+  movl $DIRECTION_UP, CHAR_DIRECTION(%rsi)
+  jmp .update_ghost_house_status_to_top
+
+
+.update_ghost_house_status_to_top:
+  cmpl $TILE_RESOLUTION/2, CHAR_Y_RATIO(%rsi)
+  jne .update_ghost_speed_next  # not y-centered
+
+  # ghost exited iff the tile below is a ghost wall
+  movl CHAR_X(%rsi), %r12d  # current ghost position x
+  movl CHAR_Y(%rsi), %r13d  # current ghost position y
+  addl $1, %r13d
+  call .get_tile_type
+  andb $TILE_GHOST_WALL, %r8b
+  cmpb $0, %r8b
+  je .update_ghost_speed_next
+
+  movl $GHOST_HOUSE_STATUS_OUTSIDE, CHAR_GHOST_HOUSE_STATUS(%rsi)
+  movl $DIRECTION_LEFT, CHAR_DIRECTION(%rsi)
+  jmp .update_ghost_speed_normal
+
 
 .update_ghost_speed_normal:
   movl $GHOST_STARTING_SPEED, CHAR_SPEED(%rsi)
