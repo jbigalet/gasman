@@ -1005,7 +1005,24 @@ main:
 .pacman_event__dot:
   mov $TILE_DOT, %r8b
   call .remove_flags_from_tile
-  jmp .pacman_event__end
+
+  # update all ghost counters
+  mov $0, %rdi  # array offset
+.pacman_event__dot__counter_loop:
+  mov GHOSTS(%rdi), %rsi
+  cmp $0, %rsi  # ghost array is 0 terminated
+  je .pacman_event__end
+
+  cmpl $GHOST_HOUSE_STATUS_INSIDE, CHAR_GHOST_HOUSE_STATUS(%rsi)
+  jne .pacman_event__next  # ghost isnt inside the ghost house
+  cmpl $0, CHAR_DOT_COUNT(%rsi)
+  je .pacman_event__next  # counter already at 0 -- should not happen but avoids edge cases
+  subl $1, CHAR_DOT_COUNT(%rsi)
+
+.pacman_event__next:
+  add $8, %rdi
+  jmp .pacman_event__dot__counter_loop
+
 
 .pacman_event__energizer:
   mov $TILE_ENERGIZE, %r8b
@@ -1069,7 +1086,7 @@ main:
   # also check if the dot count is 0
   # if thats the case, the ghost leaves the house
   # first going to the center (x), then up, then left once out
-  cmp $0, CHAR_DOT_COUNT(%rsi)
+  cmpl $0, CHAR_DOT_COUNT(%rsi)
   jne .update_ghost_speed_next
 
   cmp $GHOST_HOUSE_STATUS_TRANSITION_TO_TOP, CHAR_GHOST_HOUSE_STATUS(%rsi)
@@ -1079,8 +1096,17 @@ main:
   cmp $0, CHAR_X_RATIO(%rsi)
   jne .update_ghost_speed_next  # not at an intersection
   cmp $BOARD_WIDTH/2, CHAR_X(%rsi)  # hacky way to check the ghost can leave the house (TODO)
-  jne .update_ghost_speed_next
+  je .update_ghost_house_status_top_check
 
+  jl .update_ghost_house_status_to_right
+  movl $DIRECTION_LEFT, CHAR_DIRECTION(%rsi)
+  jmp .update_ghost_speed_next
+
+.update_ghost_house_status_to_right:
+  movl $DIRECTION_RIGHT, CHAR_DIRECTION(%rsi)
+  jmp .update_ghost_speed_next
+
+.update_ghost_house_status_top_check:
   movl $GHOST_HOUSE_STATUS_TRANSITION_TO_TOP, CHAR_GHOST_HOUSE_STATUS(%rsi)
   movl $DIRECTION_UP, CHAR_DIRECTION(%rsi)
   jmp .update_ghost_house_status_to_top
@@ -1491,6 +1517,7 @@ main:
 .remove_flags_from_tile: # x=r12, y=r13, flags=r8b
                          # no index overflow is allowed
                          # uses r14 (as board index).
+  push %r14
 
   mov $BOARD_WIDTH, %r14
   imul %r13, %r14
@@ -1500,6 +1527,7 @@ main:
 
   notb %r8b  # restore r8 register
 
+  pop %r14
   ret
 
 
