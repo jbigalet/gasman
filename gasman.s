@@ -236,13 +236,14 @@ GHOSTS:
 
 # ANIMATION
 
-.equ PACMAN_FRAME_DURATION, 10  # in game tick
+.equ PACMAN_FRAME_DURATION, 5  # in game tick
 
 .equ PACMAN_FRAME_FULL_CIRCLE, 1
 .equ PACMAN_FRAME_90_DEG_MOUTH, 2
+.equ PACMAN_FRAME_45_DEG_MOUTH, 3
 
 PACMAN_FRAMES:  # 0 terminated animation
-  .long PACMAN_FRAME_FULL_CIRCLE, PACMAN_FRAME_90_DEG_MOUTH, 0
+  .long PACMAN_FRAME_FULL_CIRCLE, PACMAN_FRAME_45_DEG_MOUTH, PACMAN_FRAME_90_DEG_MOUTH, PACMAN_FRAME_90_DEG_MOUTH,  PACMAN_FRAME_45_DEG_MOUTH,  0
 
 
 
@@ -1959,8 +1960,8 @@ main:
   jge .draw_pacman_next
 
   # if pacman is in its first frame, just draw him as a circle
-  movl CHAR_CURRENT_FRAME(%rsi), %r12d
-  cmpl $PACMAN_FRAME_FULL_CIRCLE, PACMAN_FRAMES(%r12d)
+  movl CHAR_CURRENT_FRAME(%rsi), %eax
+  cmpl $PACMAN_FRAME_FULL_CIRCLE, PACMAN_FRAMES(%eax)
   je .draw_pacman_pixel
 
 
@@ -1998,16 +1999,29 @@ main:
   xorl %r14d, %r13d
   subl %r12d, %r13d  # r&3d = abs(x)
 
+  # if we're in the 45deg case, need 3*|y] > |x|  (or 1/3)
+  cmpl $PACMAN_FRAME_90_DEG_MOUTH, PACMAN_FRAMES(%eax)
+  je .draw_pacman_90deg
+  movl $3, %eax
+  jmp .draw_pacman_after_frame_choice
+
+.draw_pacman_90deg:
+  movl $1, %eax
+
+.draw_pacman_after_frame_choice:
+
   # if direction is horizontal, need |y| > |x|, else |y| < |x|
   cmp $0, (DIRECTION_VALUES+DIRECTION_X)(%ebx)
   jne .draw_pacman_vertical_check
 
   # horizontal check
+  imull %eax, %r13d
   cmp %r13d, %edx
   jl .draw_pacman_pixel  # |y| > |x|: pixel not in mouth
   jmp .draw_pacman_next
 
 .draw_pacman_vertical_check:
+  imull %eax, %edx
   cmp %r13d, %edx
   jg .draw_pacman_pixel  # |y| < |x|: pixel not in mouth
   jmp .draw_pacman_next
