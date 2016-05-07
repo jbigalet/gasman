@@ -209,8 +209,11 @@ DIRECTION_VALUES:  # x, y, opposite direction, next direction
 .equ CHAR_CURRENT_FRAME_TICK, 60
 .equ CHAR_GHOST_HOUSE_STATUS, 64
 .equ CHAR_DOT_COUNT, 68
+.equ CHAR_FORCE_DIRECTION_CHANGE, 72
+.equ CHAR_MODE, 76
 
-.equ CHAR_STRUCT_SIZE, 72
+
+.equ CHAR_STRUCT_SIZE, 80
 
 
 
@@ -236,6 +239,28 @@ GHOSTS:
 .equ GHOST_HOUSE_STATUS_INSIDE, 1
 .equ GHOST_HOUSE_STATUS_TRANSITION_TO_CENTER, 2
 .equ GHOST_HOUSE_STATUS_TRANSITION_TO_TOP, 3
+
+
+  # ghost status
+.equ GHOST_STATUS_NORMAL, 0
+.equ GHOST_STATUS_FRIGHTENED, 1
+.equ GHOST_STATUS_EATEN, 2
+
+
+  # ghost modes
+.lcomm GHOST_CURRENT_MODE, 4
+.lcomm GHOST_MODE_TIMEOUT, 4
+
+.lcomm GHOST_MODE_BACKUP, 4  # backup the last mode while switching in frightened mode
+.lcomm GHOST_MODE_TIMEOUT_BACKUP, 4  # backup the remaining timer while switching in frightened mode
+
+.equ GHOST_MODE_CHASE, 0
+.equ GHOST_MODE_SCATTER, 1
+.equ GHOST_MODE_FRIGHTENED, 2
+
+.equ GHOST_MODE_CHASE_TIMER, 20*60  # in game tick
+.equ GHOST_MODE_SCATTER_TIMER, 7*60 # in game tick
+.equ GHOST_MODE_FRIGHTENED_TIMER, 6*60 # in game tick
 
 
 # ANIMATION
@@ -487,7 +512,7 @@ main:
 # game init
 .spawn:
 
-  # set everyone's position
+  # set everyone's position & status
   mov $0, %rdi  # array offset
 .spawn__set_position:
   mov CHARACTERS(%rdi), %rsi
@@ -504,6 +529,10 @@ main:
   movl %eax, CHAR_Y_RATIO(%rsi)
 
   movl $DIRECTION_NONE, CHAR_DIRECTION(%rsi)
+
+  movl $0, CHAR_FORCE_DIRECTION_CHANGE(%rsi)
+
+  movl $GHOST_STATUS_NORMAL, CHAR_MODE(%rsi)
 
   cmp $PACMAN, %rsi
   jne .spawn__set_position_is_ghost
@@ -540,6 +569,11 @@ main:
   movl $GHOST_HOUSE_STATUS_INSIDE, CHAR_GHOST_HOUSE_STATUS(%rsi)
   mov $CLYDE, %rsi
   movl $GHOST_HOUSE_STATUS_INSIDE, CHAR_GHOST_HOUSE_STATUS(%rsi)
+
+
+  # starts in scatter mode
+  movl $GHOST_MODE_SCATTER, GHOST_CURRENT_MODE
+  movl $GHOST_MODE_SCATTER_TIMER, GHOST_MODE_TIMEOUT
 
 
   # draw the board & then sleep for 3 seconds before starting a new round
@@ -671,6 +705,74 @@ main:
   jmp .readkey
 
 .readkey_end:
+
+
+
+
+
+  # update current mode based on timers
+  subl $1, GHOST_MODE_TIMEOUT
+  cmpl $0, GHOST_MODE_TIMEOUT
+  jne .update_current_mode_end
+
+  cmpl $GHOST_MODE_FRIGHTENED, GHOST_CURRENT_MODE
+  je .update_current_mode_from_frightened
+
+  cmpl $GHOST_MODE_SCATTER, GHOST_CURRENT_MODE
+  je .update_current_mode_from_scatter
+  jmp .update_current_mode_from_chase
+
+.update_current_mode_from_scatter:
+  movl $GHOST_MODE_CHASE, GHOST_CURRENT_MODE
+  movl $GHOST_MODE_CHASE_TIMER, GHOST_MODE_TIMEOUT
+  jmp .update_current_mode__force_direction_change
+
+.update_current_mode_from_chase:
+  movl $GHOST_MODE_SCATTER, GHOST_CURRENT_MODE
+  movl $GHOST_MODE_SCATTER_TIMER, GHOST_MODE_TIMEOUT
+  jmp .update_current_mode__force_direction_change
+
+.update_current_mode_from_frightened:
+  movl GHOST_MODE_BACKUP, %eax
+  movl %eax, GHOST_CURRENT_MODE
+  movl GHOST_MODE_TIMEOUT_BACKUP, %eax
+  movl %eax, GHOST_MODE_TIMEOUT
+
+  # if any ghost is in frightned mode, change it back to normal
+  mov $0, %rdi
+.update_current_mode_from_frightened__loop:
+  mov GHOSTS(%rdi), %rsi
+  cmp $0, %rsi
+  je .update_current_mode_end
+
+  cmpl $GHOST_STATUS_FRIGHTENED, CHAR_MODE(%rsi)
+  jne .update_current_mode_from_frightened__next
+
+  movl $GHOST_STATUS_NORMAL, CHAR_MODE(%rsi)
+
+.update_current_mode_from_frightened__next:
+  add $8, %rdi
+  jmp .update_current_mode_from_frightened__loop
+
+
+.update_current_mode__force_direction_change:
+  mov $0, %rdi
+.update_current_mode__force_direction_change_loop:
+  mov GHOSTS(%rdi), %rsi
+  cmp $0, %rsi
+  je .update_current_mode_end
+
+  movl $1, CHAR_FORCE_DIRECTION_CHANGE(%rsi)
+
+  add $8, %rdi
+  jmp .update_current_mode__force_direction_change_loop
+
+
+.update_current_mode_end:
+
+
+
+
 
 
 
@@ -813,6 +915,11 @@ main:
 
   # the ghost is centered: choose the next direction to take
   movl CHAR_DIRECTION(%rsi), %r9d  # current ghost direction - to check for the opposite one
+
+  # special case: if the ghost needs a direction change, force it
+  cmpl $1, CHAR_FORCE_DIRECTION_CHANGE(%rsi)
+  je .handle_ghost_move__force_change
+
   movl $0xffffffff, %r10d  # current minimum distance
   movl %r9d, %r11d  # current minimum distance direction
 
@@ -847,20 +954,24 @@ main:
   jne .choose_ghost_direction_next  # this direction is not possible
 
   # chase mode: TODO
-  mov $PACMAN, %rbx
-  subl CHAR_X(%rbx), %r12d  # r12 = tile x - target x
+  push %r8
+  push %r9
+
+  call .get_current_target_tile
+
+  subl %r8d, %r12d  # r12 = tile x - target x
   imull %r12d, %r12d  # r12 = (x-x')^2
-  subl CHAR_Y(%rbx), %r13d  # r13 = tile y - current y
+  subl %r9d, %r13d  # r13 = tile y - current y
   imull %r13d, %r13d  # r13 = (y-y')^2
   addl %r13d, %r12d  # r12 = (x-x')^2 + (y-y')^2
   mov %r12d, %r15d
 
-  # scatter mode: TODO
-
-
-  # frightened mode: move at random
+  # frightened mode: move at random TODO
   /* call .new_random_number */
   /* movl LAST_RANDOM_NUMBER, %r15d  # distance to the target tile */
+
+  pop %r9
+  pop %r8
 
   cmpl %r15d, %r10d
   jb .choose_ghost_direction_next
@@ -874,12 +985,69 @@ main:
   add $DIRECTION_STRUCT_SIZE, %eax
   jmp .choose_ghost_direction_loop
 
+
+.handle_ghost_move__force_change:
+  movl $0, CHAR_FORCE_DIRECTION_CHANGE(%rsi)
+  movl (DIRECTION_VALUES+DIRECTION_OPPOSITE)(%r9d), %r11d
+
 .choose_ghost_direction_end:
   movl %r11d, CHAR_DIRECTION(%rsi)
 
 .ghost_direction_change_end:
   add $8, %rdi
   jmp .handle_ghost_move_loop
+
+
+.get_current_target_tile:  # returns in r8, r9
+  push %rbx
+
+  # if in scatter mode, the target is the ghost's corner
+  cmpl $GHOST_MODE_SCATTER, GHOST_CURRENT_MODE
+  jne .get_current_target_tile__chase
+
+  movl CHAR_CORNER_TILE_X(%rsi), %r8d
+  movl CHAR_CORNER_TILE_Y(%rsi), %r9d
+
+  jmp .get_current_target_tile__end
+
+.get_current_target_tile__chase:
+
+  cmp $BLINKY, %rsi
+  je .get_current_target_tile__blinky
+  cmp $INKY, %rsi
+  je .get_current_target_tile__inky
+  cmp $PINKY, %rsi
+  je .get_current_target_tile__pinky
+  jmp .get_current_target_tile__clyde
+
+.get_current_target_tile__blinky:
+  mov $PACMAN, %rbx
+  movl CHAR_X(%rbx), %r8d  # target's x
+  movl CHAR_Y(%rbx), %r9d  # target's y
+  jmp .get_current_target_tile__end
+
+.get_current_target_tile__inky:  # TODO
+  mov $PACMAN, %rbx
+  movl $0, %r8d  # target's x
+  movl $0, %r9d  # target's y
+  jmp .get_current_target_tile__end
+
+.get_current_target_tile__pinky:  # TODO
+  mov $PACMAN, %rbx
+  movl $0, %r8d  # target's x
+  movl $0, %r9d  # target's y
+  jmp .get_current_target_tile__end
+
+.get_current_target_tile__clyde:  # TODO
+  mov $PACMAN, %rbx
+  movl $0, %r8d  # target's x
+  movl $0, %r9d  # target's y
+  jmp .get_current_target_tile__end
+
+.get_current_target_tile__end:
+  pop %rbx
+  ret
+
 
 .handle_ghost_move_end:
 
