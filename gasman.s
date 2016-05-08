@@ -306,6 +306,8 @@ GHOST_FRAMES:  # 0 terminated animation
 
 .equ TUNNEL_GHOST_SPEED, GHOST_STARTING_SPEED/2
 .equ GHOST_HOUSE_SPEED, GHOST_STARTING_SPEED/2  # ghosts are slower inside the ghost house
+.equ FRIGHTENED_GHOST_SPEED, GHOST_STARTING_SPEED*5/8  # ghosts are slower while frightened
+.equ EATEN_GHOST_SPEED, 300  # ghosts are slower while frightened
 
 
 
@@ -972,7 +974,19 @@ main:
   addl (DIRECTION_VALUES+DIRECTION_X)(%eax), %r12d
   addl (DIRECTION_VALUES+DIRECTION_Y)(%eax), %r13d
   call .get_tile_type
-  andb $(TILE_WALL | TILE_GHOST_WALL), %r8b
+
+  # set current valid walls: (in r12)
+  #   - both walls & ghost_walls in the usual situation
+  #   - only walls if the ghost has been eaten
+  push %r9
+  movb $TILE_WALL, %r9b
+  cmpl $GHOST_STATUS_EATEN, CHAR_MODE(%rsi)
+  je .choose_ghost_direction__check_wall
+  movb $(TILE_WALL | TILE_GHOST_WALL), %r9b
+
+.choose_ghost_direction__check_wall:
+  andb %r9b, %r8b
+  pop %r9
   cmpb $0, %r8b  # ie %r8b doesnt contain any wall flag
   jne .choose_ghost_direction_next  # this direction is not possible
 
@@ -1028,6 +1042,10 @@ main:
 .get_current_target_tile:  # returns in r8, r9
   push %rbx
 
+  # if eaten: go to pinky's spawn
+  cmpl $GHOST_STATUS_EATEN, CHAR_MODE(%rsi)
+  je .get_current_target_tile__eaten
+
   # if in frightened mode, take the last mode
   cmpl $GHOST_MODE_FRIGHTENED, GHOST_CURRENT_MODE
   jne .get_current_target_tile__check_chase
@@ -1081,6 +1099,16 @@ main:
   movl $0, %r8d  # target's x
   movl $0, %r9d  # target's y
   jmp .get_current_target_tile__end
+
+
+.get_current_target_tile__eaten:
+  # eaten: move to pinky's spawn
+  mov $PINKY, %rbx
+  movl CHAR_START_X(%rbx), %r8d
+  movl CHAR_START_Y(%rbx), %r9d
+
+  jmp .get_current_target_tile__end
+
 
 .get_current_target_tile__end:
   pop %rbx
@@ -1253,7 +1281,7 @@ main:
   movl $GHOST_MODE_FRIGHTENED, GHOST_CURRENT_MODE  # set the current mode
   movl $GHOST_MODE_FRIGHTENED_TIMER, GHOST_MODE_TIMEOUT  # set the current mode timer
 
-  # change all the ghost status if outside the house & not eatean
+  # change all the ghost status if outside the house & not eatean + make them change direction
 .pacman_event__energizer_loop_start:
   mov $0, %rdi
 .pacman_event__energizer_loop:
@@ -1268,6 +1296,7 @@ main:
   je .pacman_event__energizer_next
 
   movl $GHOST_STATUS_FRIGHTENED, CHAR_MODE(%rsi)
+  movl $1, CHAR_FORCE_DIRECTION_CHANGE(%rsi)
 
 .pacman_event__energizer_next:
   add $8, %rdi
@@ -1286,13 +1315,20 @@ main:
   cmp $0, %rsi  # the array is 0 terminated
   je .check_ghost_collision_end
 
+  # ignore collision if the ghost is just some eyes (ie eaten)
+  cmpl $GHOST_STATUS_EATEN, CHAR_MODE(%rsi)
+  je .check_ghost_collision_next
+
   cmpl %r12d, CHAR_X(%rsi)
   jne .check_ghost_collision_next
   cmpl %r13d, CHAR_Y(%rsi)
   jne .check_ghost_collision_next
 
-  # there was a collision: die
-  jmp .death
+  # there was a collision: eat it or die
+  cmpl $GHOST_STATUS_FRIGHTENED, CHAR_MODE(%rsi)
+  jne .death
+
+  movl $GHOST_STATUS_EATEN, CHAR_MODE(%rsi)
 
 .check_ghost_collision_next:
   add $8, %rdi
@@ -1321,7 +1357,7 @@ main:
   call .get_tile_type
   andb $TILE_TUNNEL, %r8b
   cmpb $0, %r8b
-  je .update_ghost_speed_normal # no tunnel: set normal speed
+  je .update_ghost_speed_frightened_check  # no tunnel: set normal speed
 
   movl $TUNNEL_GHOST_SPEED, CHAR_SPEED(%rsi)
   jmp .update_ghost_speed_next
@@ -1373,7 +1409,23 @@ main:
 
   movl $GHOST_HOUSE_STATUS_OUTSIDE, CHAR_GHOST_HOUSE_STATUS(%rsi)
   movl $DIRECTION_LEFT, CHAR_DIRECTION(%rsi)
-  jmp .update_ghost_speed_normal
+  jmp .update_ghost_speed_frightened_check
+
+
+.update_ghost_speed_frightened_check:
+  cmpl $GHOST_STATUS_FRIGHTENED, CHAR_MODE(%rsi)
+  jne .update_ghost_speed_eaten_check
+
+  movl $FRIGHTENED_GHOST_SPEED, CHAR_SPEED(%rsi)
+  jmp .update_ghost_speed_next
+
+
+.update_ghost_speed_eaten_check:
+  cmpl $GHOST_STATUS_EATEN, CHAR_MODE(%rsi)
+  jne .update_ghost_speed_normal
+
+  movl $EATEN_GHOST_SPEED, CHAR_SPEED(%rsi)
+  jmp .update_ghost_speed_next
 
 
 .update_ghost_speed_normal:
@@ -2520,6 +2572,10 @@ main:
   movl $-GHOST_SIZE/2+1, %r14d
   movl $-GHOST_SIZE/2+1, %r15d
 
+  # jump this part if the ghost is dead: only draw the eyes
+  cmpl $GHOST_STATUS_EATEN, CHAR_MODE(%rsi)
+  je .draw_ghost_eyes
+
 .draw_ghost_loop:
   # if in upper part: check if the current pixel is inside the circle
   cmpl $0, %r15d
@@ -2587,6 +2643,7 @@ main:
 
 
 
+.draw_ghost_eyes:
   # draw both eyes
   mov $0xffffff, %r9d
 
